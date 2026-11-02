@@ -4,145 +4,94 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#1c150f">
+  <meta name="theme-color" content="#120c08">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>dsvinyl</title>
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23d68c46'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23120c08'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="cursor-idle">
-  <main class="room" aria-label="Now playing">
-    <div class="wall"></div>
-    <div class="lamp"></div>
+  <!-- Background: a slow-drifting gradient built from the album's palette, under a golden glow. -->
+  <div class="mesh" aria-hidden="true">
+    <i class="blob b1"></i><i class="blob b2"></i><i class="blob b3"></i><i class="blob b4"></i>
+  </div>
+  <div class="glow" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
 
-    <div class="scene">
-      <div class="shelf">
-        <div class="shelf-top"></div>
-        <div class="shelf-edge"></div>
-        <div class="shelf-under"></div>
-      </div>
-
-      <!-- Album sleeve, leaning against the wall -->
-      <div class="sleeve-shadow"></div>
-      <div class="sleeve-contact"></div>
-      <div class="sleeve">
-        <div class="sleeve-blank"></div>
-        <img class="art" alt="" decoding="async" draggable="false">
-        <img class="art" alt="" decoding="async" draggable="false">
-        <div class="sleeve-wear"></div>
-      </div>
-
-      <!-- Turntable -->
-      <div class="deck-shadow"></div>
-      <div class="deck">
-        <div class="plinth-top">
-          <div class="plinth-sheen"></div>
-
-          <div class="platter">
-            <i class="rim" style="--z:.15"></i>
-            <i class="rim" style="--z:.4"></i>
-            <i class="rim" style="--z:.65"></i>
-            <i class="rim" style="--z:.9"></i>
-            <i class="rim" style="--z:1.15"></i>
-            <i class="rim" style="--z:1.4"></i>
-            <div class="platter-top"></div>
-            <div class="record-lift">
-              <div class="record" id="record" title="Play / pause">
-                <div class="grooves"></div>
-                <div class="label">
-                  <div class="label-blank"></div>
-                  <img class="art" alt="" decoding="async" draggable="false">
-                  <img class="art" alt="" decoding="async" draggable="false">
-                  <div class="label-shade"></div>
-                </div>
-              </div>
-            </div>
-            <div class="record-sheen"></div>
-            <div class="spindle"></div>
+  <main class="stage drift" aria-label="Now playing">
+    <div class="pair" id="pair">
+      <div class="disc-wrap">
+        <div class="disc" id="disc" title="Play / pause">
+          <div class="vinyl"></div>
+          <div class="spin" id="spin">
+            <div class="swirl"></div>
+            <div class="label"><div class="blank"></div><img alt="" draggable="false"><img alt="" draggable="false"></div>
           </div>
-
-          <div class="knob"></div>
-          <div class="arm-rest"><i style="--z:.5"></i><i style="--z:1"></i><i style="--z:1.5"></i><b></b></div>
-          <div class="pivot-base"><i style="--z:.4"></i><i style="--z:.9"></i><i style="--z:1.4"></i><b></b></div>
-
-          <!-- Tonearm (pivot at 5,8 in its own viewBox). Shadow is a blurred copy. -->
-          <svg class="arm-shadow" id="armShadow" viewBox="0 0 10 33" aria-hidden="true">
-            <g fill="#000">
-              <rect x="3.6" y="1.4" width="2.8" height="4" rx=".6"/>
-              <rect x="4.6" y="5" width=".8" height="3"/>
-              <circle cx="5" cy="8" r="1.5"/>
-              <rect x="4.6" y="8" width=".8" height="18.8" rx=".3"/>
-              <g transform="translate(5 26.6) rotate(20)"><rect x="-1.1" y="-.2" width="2.2" height="4.6" rx=".35"/></g>
-            </g>
-          </svg>
-          <svg class="arm" id="arm" viewBox="0 0 10 33" role="button" aria-label="Play / pause">
-            <defs>
-              <linearGradient id="cyl" x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0" stop-color="#7d7b77"/>
-                <stop offset=".35" stop-color="#f4f2ec"/>
-                <stop offset=".55" stop-color="#c9c6bf"/>
-                <stop offset="1" stop-color="#6a6762"/>
-              </linearGradient>
-              <linearGradient id="weight" x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0" stop-color="#4a4845"/>
-                <stop offset=".3" stop-color="#d9d6cf"/>
-                <stop offset=".5" stop-color="#a9a6a0"/>
-                <stop offset="1" stop-color="#3f3d3a"/>
-              </linearGradient>
-              <radialGradient id="gimbal" cx=".38" cy=".35" r=".7">
-                <stop offset="0" stop-color="#fbfaf6"/>
-                <stop offset=".5" stop-color="#b7b4ad"/>
-                <stop offset="1" stop-color="#55524e"/>
-              </radialGradient>
-              <linearGradient id="shell" x1="0" x2="1">
-                <stop offset="0" stop-color="#9a9790"/>
-                <stop offset=".4" stop-color="#ecebe6"/>
-                <stop offset="1" stop-color="#7b7873"/>
-              </linearGradient>
-            </defs>
-            <rect class="hit" x="2" y="0" width="6" height="33" fill="transparent"/>
-            <rect x="3.6" y="1.4" width="2.8" height="4" rx=".6" fill="url(#weight)"/>
-            <rect x="3.6" y="2.6" width="2.8" height=".18" fill="#2c2a28" opacity=".6"/>
-            <rect x="4.6" y="5" width=".8" height="3" fill="url(#cyl)"/>
-            <rect x="4.6" y="8" width=".8" height="18.8" rx=".3" fill="url(#cyl)"/>
-            <circle cx="5" cy="8" r="1.5" fill="url(#gimbal)"/>
-            <circle cx="5" cy="8" r=".45" fill="#3b3936"/>
-            <g transform="translate(5 26.6) rotate(20)">
-              <rect x="-1.1" y="-.2" width="2.2" height="4.6" rx=".35" fill="url(#shell)"/>
-              <rect x="-.85" y="1.4" width="1.7" height="2.6" rx=".2" fill="#1d1c1b"/>
-              <rect x="1.05" y=".5" width="1.7" height=".32" rx=".16" fill="url(#cyl)"/>
-            </g>
-          </svg>
+          <div class="sheen"></div>
+          <div class="hole"></div>
         </div>
-        <div class="plinth-front">
-          <span class="foot left"></span><span class="foot right"></span>
-        </div>
+      </div>
+      <div class="cover" id="cover" title="Play / pause">
+        <div class="blank"></div><img alt="" draggable="false"><img alt="" draggable="false">
       </div>
     </div>
-
-    <div class="grain" aria-hidden="true"></div>
-    <div class="vignette" aria-hidden="true"></div>
-    <div class="dimmer" aria-hidden="true"></div>
+    <div class="meta" id="meta" aria-live="polite">
+      <div class="title" id="title"></div>
+      <div class="artist" id="artist"></div>
+      <div class="progress"><i id="progress"></i></div>
+    </div>
   </main>
 
-  <div class="meta" id="meta" aria-live="polite">
-    <div class="meta-title" id="metaTitle"></div>
-    <div class="meta-artist" id="metaArtist"></div>
-  </div>
+  <!-- Clock: small in the corner while music plays; large and centred when nothing is playing. -->
+  <div class="clock corner drift" aria-hidden="true"><div class="time"></div><div class="date"></div></div>
+  <div class="clock focus drift"><div class="time"></div><div class="date"></div></div>
+
+  <div class="dimmer" aria-hidden="true"></div>
+  <div class="warmth" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
 
   <nav class="controls" id="controls" aria-label="Playback">
     <button type="button" data-action="previous" aria-label="Previous">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5.5" width="2" height="13" rx="1"/><path d="M18.2 6.3v11.4a.9.9 0 0 1-1.4.75L9.3 12.75a.9.9 0 0 1 0-1.5l7.5-5.7a.9.9 0 0 1 1.4.75Z"/></svg>
     </button>
     <button type="button" data-action="toggle" id="toggleBtn" aria-label="Play">
-      <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.6v12.8a1 1 0 0 0 1.52.85l10.1-6.4a1 1 0 0 0 0-1.7L9.52 4.75A1 1 0 0 0 8 5.6Z"/></svg>
-      <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2"/></svg>
+      <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.6v12.8a1 1 0 0 0 1.52.85l10.1-6.4a1 1 0 0 0 0-1.7L9.52 4.75A1 1 0 0 0 8 5.6Z"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2"/></svg>
     </button>
     <button type="button" data-action="next" aria-label="Next">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="17" y="5.5" width="2" height="13" rx="1"/><path d="M5.8 6.3v11.4a.9.9 0 0 0 1.4.75l7.5-5.7a.9.9 0 0 0 0-1.5l-7.5-5.7a.9.9 0 0 0-1.4.75Z"/></svg>
     </button>
   </nav>
 
-  <button type="button" class="connect" id="connect" hidden>Connect Spotify</button>
+  <!-- One-time setup (only when no Client ID is saved). -->
+  <section class="setup" id="setup" hidden aria-labelledby="setupTitle">
+    <h1 id="setupTitle">Set up dsvinyl</h1>
+    <p class="lede">A one-time link to your Spotify account. It takes about a minute.</p>
+    <ol>
+      <li>
+        <span>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify Developer Dashboard</a> and create an app. Tick <em>Web API</em>.</span>
+      </li>
+      <li>
+        <span>Add this exact Redirect URI to the app:</span>
+        <div class="uri"><code id="redirectUri"></code><button type="button" id="copyUri">Copy</button></div>
+      </li>
+      <li>
+        <span>Paste the app's Client ID here:</span>
+        <form class="cid" id="cidForm" autocomplete="off">
+          <input id="cidInput" type="text" inputmode="latin" spellcheck="false" placeholder="Client ID" aria-label="Client ID">
+          <button type="submit">Save</button>
+        </form>
+        <div class="hint" id="cidHint">You only need the Client ID. No secret.</div>
+      </li>
+    </ol>
+  </section>
+
+  <div class="connect" id="connect" hidden>
+    <button type="button" class="connect-btn" id="connectBtn">Connect Spotify</button>
+    <button type="button" class="connect-alt" id="changeCid">Use a different Client ID</button>
+  </div>
 
   <script src="app.js" defer></script>
 </body>
