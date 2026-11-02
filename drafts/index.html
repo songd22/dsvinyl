@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsvinyl — visual drafts</title>
+<style>
+  :root { --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #1b1916; color: #eee6da; font: 13px/1.3 var(--font); -webkit-font-smoothing: antialiased; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; padding: 10px 16px; border-bottom: 1px solid #ffffff14; }
+  h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  .group { display: flex; align-items: center; gap: 4px; }
+  .group span { color: #eee6da88; margin-right: 4px; }
+  button { font: inherit; color: inherit; background: #ffffff0d; border: 1px solid #ffffff1a; border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+  button:hover { background: #ffffff18; }
+  button[aria-pressed="true"] { background: #eee6da; color: #1b1916; border-color: #eee6da; }
+  .cover-name { min-width: 14em; text-align: center; color: #eee6dacc; }
+  .note { color: #eee6da88; font-size: 12px; flex-basis: 100%; }
+  main { position: relative; overflow: hidden; display: grid; place-items: center; padding: 18px; }
+  .frame { position: relative; transform-origin: center; box-shadow: 0 20px 60px #0008, 0 0 0 1px #ffffff14; border-radius: 10px; overflow: hidden; background: #000; }
+  .frame iframe { display: block; width: 100%; height: 100%; border: 0; }
+  .fill .frame { border-radius: 0; box-shadow: none; }
+  .fill { padding: 0; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>dsvinyl · drafts</h1>
+    <div class="group" id="drafts">
+      <span>Direction</span>
+      <button data-draft="ember">1 Ember</button>
+      <button data-draft="poster">2 Poster</button>
+      <button data-draft="paper">3 Paper</button>
+      <button data-draft="orbit">4 Orbit</button>
+    </div>
+    <div class="group" id="sizes">
+      <span>Frame</span>
+      <button data-size="1180x820">Tablet landscape</button>
+      <button data-size="820x1180">Tablet portrait</button>
+      <button data-size="fill">Fill window</button>
+    </div>
+    <div class="group">
+      <span>Cover</span>
+      <button data-act="prev">‹</button>
+      <div class="cover-name" id="coverName">…</div>
+      <button data-act="next">›</button>
+      <button data-act="toggle" id="playBtn">Pause</button>
+    </div>
+    <div class="note">Keys: 1–4 direction · ← → cover · Space play/pause. Inside a draft, move the mouse to see its controls. Each draft also opens on its own.</div>
+  </header>
+  <main id="main"><div class="frame" id="frame"><iframe id="view" title="draft"></iframe></div></main>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const view = $('#view'), frame = $('#frame'), main = $('#main');
+  const pref = (() => { try { return JSON.parse(localStorage.getItem('dsvinyl.viewer') || '{}'); } catch { return {}; } })();
+  let draft = pref.draft || 'ember', size = pref.size || '1180x820';
+
+  function save() { try { localStorage.setItem('dsvinyl.viewer', JSON.stringify({ draft, size })); } catch {} }
+  function pressed(sel, attr, val) { document.querySelectorAll(sel).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset[attr] === val))); }
+
+  function load() { view.src = `${draft}.html`; pressed('[data-draft]', 'draft', draft); save(); }
+  function layout() {
+    pressed('[data-size]', 'size', size); save();
+    main.classList.toggle('fill', size === 'fill');
+    if (size === 'fill') { frame.style.width = '100%'; frame.style.height = '100%'; frame.style.transform = ''; return; }
+    const [w, h] = size.split('x').map(Number);
+    frame.style.width = w + 'px'; frame.style.height = h + 'px';
+    const r = main.getBoundingClientRect();
+    const k = Math.min(1, (r.width - 36) / w, (r.height - 36) / h);
+    frame.style.transform = `scale(${k})`;
+  }
+  const send = (act) => view.contentWindow && view.contentWindow.postMessage({ type: 'ds', act }, '*');
+
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.draft) { draft = b.dataset.draft; load(); }
+    if (b.dataset.size) { size = b.dataset.size; layout(); }
+    if (b.dataset.act) send(b.dataset.act);
+    b.blur();
+  });
+  addEventListener('keydown', (e) => {
+    const map = { '1': 'ember', '2': 'poster', '3': 'paper', '4': 'orbit' };
+    if (map[e.key]) { draft = map[e.key]; load(); }
+    else if (e.key === 'ArrowRight') send('next');
+    else if (e.key === 'ArrowLeft') send('prev');
+    else if (e.code === 'Space') { e.preventDefault(); send('toggle'); }
+  });
+  addEventListener('message', (e) => {
+    const m = e.data || {}; if (m.type !== 'ds-state') return;
+    $('#coverName').textContent = `${m.index + 1}/6 · ${m.name}`;
+    $('#playBtn').textContent = m.playing ? 'Pause' : 'Play';
+  });
+  addEventListener('resize', layout);
+  load(); layout();
+</script>
+</body>
+</html>

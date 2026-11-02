@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper — dsvinyl draft</title>
+<style>
+  :root {
+    --S: min(58vh, 37vw);                        /* cover size */
+    --accent: rgb(200 120 60);
+    --paper: rgb(238 231 219);
+    --ink: rgb(38 31 26);
+    --ink-soft: rgb(38 31 26 / .58);
+    --serif: "Iowan Old Style", "Charter", "Bitstream Charter", "Palatino", Georgia, serif;
+    --sans: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  @media (orientation: portrait) { :root { --S: min(66vw, 42vh); } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; transition: background-color 2s ease; }
+  body.idle { cursor: none; }
+
+  /* Paper, lit by low evening sun from the upper right. */
+  .light {
+    position: fixed; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 70% 80% at 100% 0%, rgb(255 196 120 / .42), transparent 65%),
+      radial-gradient(ellipse 80% 60% at 0% 100%, rgb(120 90 60 / .16), transparent 70%),
+      linear-gradient(200deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%);
+    transition: opacity 2.4s ease;
+  }
+  body.paused .light { opacity: .55; }
+  .tooth {
+    position: fixed; inset: 0; pointer-events: none; opacity: .32; mix-blend-mode: multiply;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55  0 0 0 0 .5  0 0 0 0 .45  0 0 0 -.9 .62'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  .stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; gap: calc(var(--S) * .2); }
+  @media (orientation: portrait) { .stage { flex-direction: column; gap: calc(var(--S) * .14); padding: 0 0 2vh; } }
+
+  /* Flat lay: cover on the paper, a clear record resting across its lower-right corner. */
+  .lay { position: relative; width: calc(var(--S) * 1.28); height: calc(var(--S) * 1.12); flex: none; }
+  .cover {
+    position: absolute; left: 0; top: 0; width: var(--S); height: var(--S);
+    transform: rotate(-1.6deg);
+    box-shadow:
+      0 1px 1px rgb(60 40 20 / .10),
+      0 calc(var(--S) * .02) calc(var(--S) * .03) rgb(60 40 20 / .12),
+      0 calc(var(--S) * .06) calc(var(--S) * .12) rgb(60 40 20 / .16);
+    background: #ddd;
+  }
+  .cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; }
+  .cover img.on { opacity: 1; }
+  .cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(210deg, rgb(255 236 200 / .16), transparent 45%, rgb(60 40 20 / .07)); }
+
+  .disc {
+    position: absolute; width: calc(var(--S) * .86); height: calc(var(--S) * .86);
+    left: calc(var(--S) * .42); top: calc(var(--S) * .26);
+    border-radius: 50%;
+    transition: transform 1.1s cubic-bezier(.2, .8, .2, 1);
+  }
+  .lay.swap .disc { transform: translate(calc(var(--S) * .05), calc(var(--S) * .03)) scale(.985); transition-duration: .6s; }
+  .acrylic {           /* clear, faintly tinted acrylic: you see the cover and paper through it */
+    position: absolute; inset: 0; border-radius: 50%;
+    background:
+      radial-gradient(circle, transparent 0 95.5%, rgb(255 255 255 / .6) 97%, rgb(255 255 255 / .25) 98.6%, rgb(80 60 40 / .35) 100%),
+      radial-gradient(circle, transparent 0 35.5%, rgb(80 60 40 / .12) 36%, transparent 37.5%, transparent 92%, rgb(80 60 40 / .08) 93%, transparent 94%),
+      repeating-radial-gradient(circle, rgb(255 255 255 / .10) 0 1px, rgb(80 60 40 / .035) 1px 3px),
+      radial-gradient(circle, color-mix(in srgb, var(--accent) 9%, rgb(255 255 255 / .05)) 0 60%, color-mix(in srgb, var(--accent) 16%, rgb(255 255 255 / .06)) 100%);
+    -webkit-backdrop-filter: blur(1.5px) saturate(1.1) brightness(1.03); backdrop-filter: blur(1.5px) saturate(1.1) brightness(1.03);
+    box-shadow:
+      0 calc(var(--S) * .025) calc(var(--S) * .04) rgb(60 40 20 / .12),
+      0 calc(var(--S) * .07) calc(var(--S) * .14) rgb(60 40 20 / .14);
+  }
+  .spin { position: absolute; inset: 0; will-change: transform; }
+  .label { position: absolute; left: 33%; top: 33%; width: 34%; height: 34%; border-radius: 50%; overflow: hidden; box-shadow: 0 1px 2px rgb(60 40 20 / .25); }
+  .label img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1s ease; }
+  .label img.on { opacity: 1; }
+  .print {             /* a faint printed arc on the acrylic so the turning is visible */
+    position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(from 20deg, rgb(255 255 255 / .22) 0 2deg, transparent 2deg 360deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 60%, #000 60.5% 62%, transparent 62.5%); mask: radial-gradient(circle, transparent 0 60%, #000 60.5% 62%, transparent 62.5%);
+  }
+  .glint {             /* fixed highlights from the window */
+    position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+    background:
+      radial-gradient(ellipse 22% 6% at 70% 17%, rgb(255 255 255 / .22), transparent 70%),
+      conic-gradient(from 0deg, transparent 0 20deg, rgb(255 255 255 / .16) 42deg, transparent 64deg, transparent 200deg, rgb(255 255 255 / .1) 222deg, transparent 244deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 34.5%, #000 35%); mask: radial-gradient(circle, transparent 0 34.5%, #000 35%);
+  }
+  .hole { position: absolute; left: 48.8%; top: 48.8%; width: 2.4%; height: 2.4%; border-radius: 50%; background: var(--paper); box-shadow: inset 0 1px 2px rgb(60 40 20 / .4); }
+
+  /* Type */
+  .text { width: min(34vw, 50vh); transition: opacity .5s ease, transform .6s cubic-bezier(.2, .8, .2, 1); }
+  @media (orientation: portrait) { .text { width: calc(var(--S) * 1.28); text-align: left; } }
+  .text.out { opacity: 0; transform: translateY(.8vh); }
+  .kicker { font: 500 max(11px, 1.3vmin)/1 var(--sans); letter-spacing: .24em; text-transform: uppercase; color: var(--ink-soft); }
+  .title {
+    margin-top: .7em; font-family: var(--serif); font-weight: 400; font-size: max(30px, 5.2vmin); line-height: 1.06; letter-spacing: -.01em;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-wrap: balance;
+  }
+  .artist { margin-top: .7em; font-size: max(15px, 2.1vmin); color: var(--ink-soft); }
+  .rule { margin-top: max(18px, 3vmin); height: 1px; width: 62%; background: rgb(38 31 26 / .14); position: relative; }
+  .rule i { position: absolute; left: 0; top: 0; height: 1px; background: rgb(38 31 26 / .6); }
+
+  .controls { display: flex; gap: 2px; margin: max(14px, 2.4vmin) 0 0 -10px; transition: opacity .5s ease; }
+  body.idle .controls { opacity: 0; pointer-events: none; transition-duration: 1.2s; }
+  .controls button { width: max(40px, 4.8vmin); height: max(40px, 4.8vmin); border: 0; border-radius: 50%; background: none; color: var(--ink); cursor: pointer; display: grid; place-items: center; }
+  .controls button:hover { background: rgb(38 31 26 / .07); }
+  .controls svg { width: 46%; height: 46%; fill: currentColor; }
+  .i-pause { display: none; } body:not(.paused) .i-pause { display: block; } body:not(.paused) .i-play { display: none; }
+</style>
+</head>
+<body>
+  <div class="light"></div>
+  <div class="tooth"></div>
+
+  <main class="stage">
+    <div class="lay" id="lay">
+      <div class="cover"><img alt=""><img alt=""></div>
+      <div class="disc">
+        <div class="acrylic"></div>
+        <div class="spin" id="spin"><div class="print"></div><div class="label"><img alt=""><img alt=""></div></div>
+        <div class="glint"></div>
+        <div class="hole"></div>
+      </div>
+    </div>
+    <div class="text" id="text">
+      <div class="kicker">Now playing</div>
+      <div class="title" id="title"></div>
+      <div class="artist" id="artist"></div>
+      <div class="rule"><i id="bar"></i></div>
+      <nav class="controls">
+        <button data-act="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><rect x="5" y="5.5" width="2" height="13" rx="1"/><path d="M18.2 6.3v11.4a.9.9 0 0 1-1.4.75L9.3 12.75a.9.9 0 0 1 0-1.5l7.5-5.7a.9.9 0 0 1 1.4.75Z"/></svg></button>
+        <button data-act="toggle" aria-label="Play/pause"><svg class="i-play" viewBox="0 0 24 24"><path d="M8 5.6v12.8a1 1 0 0 0 1.52.85l10.1-6.4a1 1 0 0 0 0-1.7L9.52 4.75A1 1 0 0 0 8 5.6Z"/></svg><svg class="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2"/></svg></button>
+        <button data-act="next" aria-label="Next"><svg viewBox="0 0 24 24"><rect x="17" y="5.5" width="2" height="13" rx="1"/><path d="M5.8 6.3v11.4a.9.9 0 0 0 1.4.75l7.5-5.7a.9.9 0 0 0 0-1.5l-7.5-5.7a.9.9 0 0 0-1.4.75Z"/></svg></button>
+      </nav>
+    </div>
+  </main>
+
+<script src="shared.js"></script>
+<script>
+  const $ = (s) => document.querySelector(s);
+  const root = document.documentElement;
+  const spin = DS.spinner($('#spin'));
+  const setArt = DS.crossfader([[...document.querySelectorAll('.cover img')], [...document.querySelectorAll('.label img')]], (el, t) => { el.src = t.url; });
+
+  function tone(p) {
+    // The record picks up a hint of the cover; the paper warms a touch toward it.
+    let [h, s, l] = DS.rgbToHsl(p.colorful ? p.vibrant : [200, 150, 100]);
+    root.style.setProperty('--accent', DS.css(DS.hslToRgb([h, DS.clamp(s, .3, .7), .5])));
+    const paper = DS.mix([238, 231, 219], DS.hslToRgb([h, .35, .86]), p.colorful ? .12 : .04);
+    root.style.setProperty('--paper', DS.css(paper));
+  }
+  function text(t) { $('#title').textContent = t.title; $('#artist').textContent = t.artist; }
+
+  DS.ready((t) => { setArt(t); tone(t.palette); text(t); document.body.classList.toggle('paused', !DS.playing); spin.set(DS.playing, true); });
+  DS.on('play', (on) => { document.body.classList.toggle('paused', !on); spin.set(on); });
+  DS.on('track', (t) => {
+    $('#lay').classList.add('swap'); $('#text').classList.add('out');
+    setTimeout(() => { setArt(t); tone(t.palette); }, 250);
+    setTimeout(() => { text(t); $('#text').classList.remove('out'); $('#lay').classList.remove('swap'); }, 550);
+  });
+  (function tick() { $('#bar').style.width = (DS.progressNow() / DS.duration * 100) + '%'; setTimeout(tick, 500); })();
+</script>
+</body>
+</html>
