@@ -17,11 +17,22 @@ That's it. From then on, the bookmark opens straight to the display.
 
 Double-click (or double-tap) for fullscreen. Space plays or pauses, ← → skip. Move the mouse to show the controls.
 
+## Settings
+
+Open settings with the gear next to the playback controls, or press **S**. Close with **Esc**, the gear, or a click outside. Changes apply straight away and are remembered on that device.
+
+- **Visualizer:** a soft row of light along the bottom of the screen, tinted by the album. *Ambient* (default) drifts gently while music plays and settles when paused. *Mic* follows the sound in the room. It asks for the microphone only when you pick it, and nothing leaves your device. If the mic isn't allowed or available, it falls back to Ambient. *Off* turns it off.
+- **Clock:** show or hide it, 12h or 24h, with or without the date.
+- **Evening mode:** gently warms and dims the screen at night (9 pm to 6 am by default; set your own times).
+- **Progress line:** show or hide it.
+- **Spotify:** see which account is connected, **Disconnect**, or **Reset setup** to start over with a new Client ID.
+- **Restore defaults** at the bottom resets the display settings.
+
 ## Troubleshooting
 
 - **Nothing showing?** Start playing something in Spotify on any device, so there's an active device.
 - **Controls do nothing?** Play, pause and skip need **Spotify Premium** and an active device. New Spotify apps start in development mode, where Spotify may also require the app owner to have Premium.
-- **Start over:** open the page with `?reset` on the end (for example `https://songd22.github.io/dsvinyl/?reset`). This clears the saved Client ID and sign-in.
+- **Start over:** use **Reset setup** in settings, or open the page with `?reset` on the end (for example `https://songd22.github.io/dsvinyl/?reset`). This clears the saved Client ID and sign-in.
 
 ## Running locally
 

@@ -32,6 +32,7 @@ const IDLE_AFTER_PAUSE = 10 * 60000; // a long pause counts as "nothing playing"
 const K = {
   access: 'dsvinyl.access', expires: 'dsvinyl.expires', refresh: 'dsvinyl.refresh',
   verifier: 'dsvinyl.verifier', state: 'dsvinyl.state', last: 'dsvinyl.last', clientId: 'dsvinyl.clientId',
+  settings: 'dsvinyl.settings', account: 'dsvinyl.account',
 };
 
 const store = {
@@ -482,6 +483,7 @@ function choreograph(track, img) {
   choreoTimers.forEach(clearTimeout);
   els.pair.classList.add('swap');
   els.meta.classList.add('out');
+  viz.poke();
   choreoTimers = [
     setTimeout(() => { applyArt(img, track.art); setText(track); drawProgress(true); els.meta.classList.remove('out'); }, 560),
     setTimeout(() => els.pair.classList.remove('swap'), 700),
@@ -617,6 +619,7 @@ function setPalette(img) {
   }
   mesh.forEach((c, i) => root.style.setProperty(`--m${i}`, cssRgb(c)));
   root.style.setProperty('--tint', cssRgb(tint));
+  viz.colours(tint, mesh[1], mesh[3]);
 }
 
 /* ───────────────────────── Progress, clock, evening, drift ───────────────────────── */
@@ -628,13 +631,16 @@ function drawProgress(instant) {
   els.progress.style.transform = `scaleX(${f.toFixed(4)})`;
 }
 
-const fmtTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+let fmtTime = null;
+function buildClockFormat() {
+  fmtTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hourCycle: settings.clockFormat === '24' ? 'h23' : 'h12' });
+}
 const fmtDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 let clockMinute = -1;
 function drawClock() {
   const now = new Date();
   const minute = Math.floor(now.getTime() / 60000);
-  if (minute === clockMinute) return;
+  if (minute === clockMinute || !fmtTime) return;
   clockMinute = minute;
   const parts = fmtTime.formatToParts(now);
   const main = parts.filter((p) => p.type !== 'dayPeriod').map((p) => p.value).join('').trim();
@@ -646,11 +652,18 @@ function drawClock() {
   document.querySelectorAll('.clock .date').forEach((el) => { el.textContent = fmtDate.format(now); });
 }
 
-// 0 by day, easing to 1 between 20:30–21:30, back to 0 between 05:30–06:30.
+// 0 by day, 1 at night. Each edge eases over an hour centred on the chosen time
+// (by default 21:00 and 06:00), so the change is never noticeable as it happens.
 function eveningLevel(d) {
-  const h = d.getHours() + d.getMinutes() / 60;
-  const ramp = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : 0.5 - Math.cos(Math.PI * x) / 2);
-  return h >= 12 ? ramp(h - 20.5) : 1 - ramp(h - 5.5);
+  if (!settings.evening) return 0;
+  const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  const start = toMin(settings.eveningStart), end = toMin(settings.eveningEnd);
+  if (start === end) return 0;
+  const now = d.getHours() * 60 + d.getMinutes();
+  const inside = (x) => { x = ((x % 1440) + 1440) % 1440; return start < end ? x >= start && x < end : x >= start || x < end; };
+  let n = 0;
+  for (let k = -30; k <= 30; k++) n += inside(now + k);
+  return 0.5 - Math.cos(Math.PI * (n / 61)) / 2;
 }
 function drawEvening() { root.style.setProperty('--evening', eveningLevel(new Date()).toFixed(3)); }
 
@@ -684,6 +697,7 @@ function render() {
   els.toggle.setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
   spin.set(state.playing);
   drawProgress();
+  viz.poke();
 }
 
 // Which screen: first-run setup, "Connect Spotify", or the live display.
@@ -694,6 +708,8 @@ function setMode() {
   els.setup.hidden = mode !== 'setup';
   els.connect.hidden = mode !== 'connect';
   if (mode === 'setup') $('#redirectUri').textContent = REDIRECT_URI;
+  viz.poke();
+  if (panel.open) syncPanel();
   return mode;
 }
 
@@ -705,7 +721,7 @@ function clearTokens() {
 
 function resetAll() {
   clearTokens();
-  [K.clientId, K.last].forEach((k) => store.del(k));
+  [K.clientId, K.last, K.account].forEach((k) => store.del(k));
 }
 
 function bindSetup() {
@@ -744,6 +760,418 @@ function bindSetup() {
   [els.setup, els.connect].forEach((el) => el.addEventListener('dblclick', (e) => e.stopPropagation()));
 }
 
+/* ───────────────────────── Settings ─────────────────────────
+ * One config object with defaults. To add an option: add a default here, (optionally) a
+ * list of valid values, a control in the panel with data-setting="key", and handle it in
+ * applySettings(). Everything is saved to localStorage and applied at once. */
+
+const DEFAULTS = Object.freeze({
+  visualizer: 'ambient',                       // 'off' | 'ambient' | 'mic'
+  clock: true,
+  clockFormat: new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12 ? '12' : '24',
+  clockDate: true,
+  evening: true,
+  eveningStart: '21:00',
+  eveningEnd: '06:00',
+  progress: true,
+});
+const CHOICES = { visualizer: ['off', 'ambient', 'mic'], clockFormat: ['12', '24'] };
+const isTime = (v) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+
+function loadSettings() {
+  let saved = {};
+  try { saved = JSON.parse(store.get(K.settings) || '{}') || {}; } catch { saved = {}; }
+  const out = { ...DEFAULTS };
+  for (const key of Object.keys(DEFAULTS)) {
+    const v = saved[key];
+    if (v === undefined || typeof v !== typeof DEFAULTS[key]) continue;
+    if (CHOICES[key] && !CHOICES[key].includes(v)) continue;
+    if (/^evening(Start|End)$/.test(key) && !isTime(v)) continue;
+    out[key] = v;
+  }
+  return out;
+}
+let settings = loadSettings();
+function saveSettings() { store.set(K.settings, JSON.stringify(settings)); }
+
+function setSetting(key, value) {
+  if (settings[key] === value) return;
+  settings[key] = value;
+  saveSettings();
+  applySettings(key);
+  syncPanel();
+}
+
+let quickEveningTimer = 0;
+function applySettings(changed) {
+  root.classList.toggle('no-clock', !settings.clock);
+  root.classList.toggle('no-date', !settings.clockDate);
+  root.classList.toggle('no-progress', !settings.progress);
+  if (!changed || changed === 'clockFormat') { buildClockFormat(); clockMinute = -1; drawClock(); }
+  if (!changed || /^evening/.test(changed)) {
+    if (changed) {               // show the change within seconds, not over the usual minute
+      root.classList.add('quick-evening');
+      clearTimeout(quickEveningTimer);
+      quickEveningTimer = setTimeout(() => root.classList.remove('quick-evening'), 3000);
+    }
+    drawEvening();
+  }
+  if (!changed || changed === 'visualizer') {
+    if (changed === 'visualizer') setVizNote('');
+    viz.setMode(settings.visualizer, !!changed);
+  }
+}
+
+/* Panel */
+
+const panel = { el: $('#settings'), scrim: $('#scrim'), gear: $('#gearBtn'), open: false };
+
+function openSettings() {
+  if (panel.open) return;
+  panel.open = true;
+  root.classList.add('settings-open');
+  panel.el.setAttribute('aria-hidden', 'false');
+  panel.gear.setAttribute('aria-expanded', 'true');
+  panel.scrim.hidden = false;
+  syncPanel();
+  loadAccount();
+  nudgeCursor();
+  panel.el.focus({ preventScroll: true });
+}
+function closeSettings() {
+  if (!panel.open) return;
+  panel.open = false;
+  root.classList.remove('settings-open');
+  panel.el.setAttribute('aria-hidden', 'true');
+  panel.gear.setAttribute('aria-expanded', 'false');
+  panel.scrim.hidden = true;
+  if (panel.el.contains(document.activeElement)) document.activeElement.blur();
+  nudgeCursor();
+}
+const toggleSettings = () => (panel.open ? closeSettings() : openSettings());
+
+function syncPanel() {
+  panel.el.querySelectorAll('[data-setting]').forEach((el) => {
+    const v = settings[el.dataset.setting];
+    if (el.classList.contains('switch')) el.setAttribute('aria-checked', String(!!v));
+    else if (el.classList.contains('seg')) el.querySelectorAll('[data-value]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === v)));
+    else if (el.tagName === 'INPUT' && document.activeElement !== el) el.value = v;
+  });
+  panel.el.querySelectorAll('[data-requires]').forEach((row) => row.classList.toggle('off', !settings[row.dataset.requires]));
+  const live = !!clientId() && !auth.dead && !!(auth.refresh || auth.access);
+  const name = store.get(K.account);
+  const acct = $('#account');
+  acct.textContent = '';
+  if (live) {
+    acct.append(name ? 'Connected as ' : 'Connected');
+    if (name) { const b = document.createElement('strong'); b.textContent = name; acct.append(b); }
+  } else acct.textContent = clientId() ? 'Not connected' : 'Not set up yet';
+  $('#disconnectBtn').disabled = !live;
+  $('#resetBtn').disabled = !clientId() && !live;
+}
+
+function setVizNote(text) { $('#vizNote').textContent = text; }
+
+async function loadAccount(force) {
+  if (!clientId() || auth.dead || !(auth.refresh || auth.access)) return;
+  if (!force && store.get(K.account)) return;
+  try {
+    const res = await api('GET', '/me');
+    if (!res.ok) return;
+    const me = await res.json();
+    store.set(K.account, me.display_name || me.id || '');
+    syncPanel();
+  } catch { /* the name is a nicety; polling handles auth trouble */ }
+}
+
+function signOutLocally() {
+  stopPolling();
+  state.expect = null; state.real = false; state.playing = false; state.hasPlayback = false;
+  render();
+}
+
+function bindSettings() {
+  panel.el.addEventListener('click', (e) => {
+    const sw = e.target.closest('.switch[data-setting]');
+    if (sw) { setSetting(sw.dataset.setting, !settings[sw.dataset.setting]); return; }
+    const opt = e.target.closest('.seg [data-value]');
+    if (opt) { setSetting(opt.closest('.seg').dataset.setting, opt.dataset.value); }
+  });
+  panel.el.querySelectorAll('input[type="time"][data-setting]').forEach((input) => {
+    input.addEventListener('change', () => { if (isTime(input.value)) setSetting(input.dataset.setting, input.value); });
+  });
+  $('#settingsClose').addEventListener('click', closeSettings);
+  panel.scrim.addEventListener('pointerdown', (e) => { e.preventDefault(); closeSettings(); });
+  panel.scrim.addEventListener('click', (e) => e.stopPropagation());
+  [panel.el, panel.scrim].forEach((el) => el.addEventListener('dblclick', (e) => e.stopPropagation()));
+
+  $('#disconnectBtn').addEventListener('click', () => {
+    clearTokens();
+    store.del(K.account);
+    auth.dead = false;
+    signOutLocally();
+    setMode();
+    closeSettings();
+  });
+  $('#resetBtn').addEventListener('click', () => {
+    resetAll();
+    auth.dead = false;
+    signOutLocally();
+    $('#cidInput').value = '';
+    setMode();
+    closeSettings();
+  });
+  $('#restoreBtn').addEventListener('click', () => {
+    settings = { ...DEFAULTS };
+    saveSettings();
+    setVizNote('');
+    applySettings();
+    syncPanel();
+  });
+}
+
+/* ───────────────────────── Visualizer ─────────────────────────
+ * A row of soft, rounded bars along the bottom edge, tinted by the album. Mirrored from
+ * the centre: the middle is the low end, the edges the highs, and both ends taper away.
+ * Ambient: a slow wave travels outward while music plays and settles when paused.
+ * Mic: the bars follow real frequency bands, heavily smoothed.
+ * One small canvas strip, at most 30 fps, and it stops drawing whenever nothing moves. */
+
+const viz = (() => {
+  const canvas = $('#viz');
+  const g = canvas.getContext('2d');
+  const FRAME_MS = 1000 / 30;
+  const SLOT = 11;                 // CSS px per bar (bar + gap): fine lines, not blocks
+  let W = 0, H = 0, scale = 1, N = 0, raf = 0, last = 0, clock = 0, mode = 'off';
+  let vis = 0, energy = 0;
+  let cur = new Float32Array(0), seed = new Float32Array(0), soft = new Float32Array(0);
+  const col = [DEFAULT_TINT.slice(), DEFAULT_MESH[1].slice(), DEFAULT_MESH[3].slice()];
+  const want = col.map((c) => c.slice());
+  const mic = { stream: null, ctx: null, an: null, fd: null, td: null, level: 0, bands: new Float32Array(32), peaks: new Float32Array(32).fill(0.15), token: 0 };
+
+  function resize() {
+    scale = Math.min(2, window.devicePixelRatio || 1);
+    const r = canvas.getBoundingClientRect();
+    W = canvas.width = Math.max(1, Math.round(r.width * scale));
+    H = canvas.height = Math.max(1, Math.round(r.height * scale));
+    const n = Math.max(12, 2 * Math.round(r.width / SLOT / 2));
+    if (n !== N) {
+      N = n;
+      const old = cur; cur = new Float32Array(N);
+      for (let i = 0; i < N; i++) cur[i] = old.length ? old[Math.floor(i * old.length / N)] : 0;
+      seed = Float32Array.from({ length: N }, () => Math.random() * Math.PI * 2);
+      soft = new Float32Array(N);
+    }
+    poke();
+  }
+
+  const visTarget = () => (mode === 'off' || root.classList.contains('idle') || root.classList.contains('setup-mode') || root.classList.contains('connect-mode') ? 0 : 1);
+  const energyTarget = () => (mode === 'mic' ? 1 : state.playing ? 1 : 0);
+
+  // Distance from the centre, 0 (middle) … 1 (edge), and the gentle taper toward both ends.
+  const dist = (i) => Math.abs((i + 0.5) / N * 2 - 1);
+  const envelope = (d) => (0.38 + 0.62 * Math.pow(1 - d, 1.15)) * Math.min(1, (1 - d) / 0.14);
+
+  function listen() {
+    if (!mic.an) return;
+    mic.an.getFloatTimeDomainData(mic.td);
+    let sum = 0;
+    for (let i = 0; i < mic.td.length; i++) sum += mic.td[i] * mic.td[i];
+    const db = 20 * Math.log10(Math.sqrt(sum / mic.td.length) + 1e-7);
+    mic.level += (clamp((db + 60) / 46, 0, 1) - mic.level) * 0.2;
+    mic.an.getByteFrequencyData(mic.fd);
+    const hz = mic.ctx.sampleRate / mic.an.fftSize, B = mic.bands.length;
+    for (let b = 0; b < B; b++) {               // log-spaced bands, 40 Hz – 9 kHz
+      const lo = 40 * Math.pow(9000 / 40, b / B), hi = 40 * Math.pow(9000 / 40, (b + 1) / B);
+      let s = 0, n = 0;
+      for (let k = Math.max(1, Math.floor(lo / hz)); k <= Math.min(mic.fd.length - 1, Math.ceil(hi / hz)); k++) { s += mic.fd[k]; n++; }
+      const v = n ? s / n / 255 : 0;
+      mic.peaks[b] = Math.max(v, mic.peaks[b] * 0.996, 0.1);   // self-adjusting, so quiet rooms still read
+      mic.bands[b] = v / mic.peaks[b];
+    }
+  }
+
+  function target(i) {
+    const d = dist(i), env = envelope(d);
+    if (mode === 'mic') {
+      const b = Math.min(mic.bands.length - 1, Math.floor(d * mic.bands.length));
+      return env * Math.pow(mic.bands[b], 1.4) * (0.45 + 0.55 * mic.level);
+    }
+    // Ambient: two slow waves drifting outward from the centre, a little different per bar.
+    const w1 = 0.5 + 0.5 * Math.sin(clock * 0.95 - d * 5.2 + seed[i] * 0.18);
+    const w2 = 0.5 + 0.5 * Math.sin(clock * 0.53 + d * 2.9 + seed[i] * 0.25);
+    const breathe = 0.88 + 0.12 * Math.sin(clock * 0.6);
+    return env * (0.06 + energy * (0.22 + 0.95 * w1 * w2) * breathe);
+  }
+
+  const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+
+  // Heights blended with their neighbours, so the row reads as one flowing shape.
+  function smooth() {
+    soft.set(cur);
+    const tmp = new Float32Array(N);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < N; i++) tmp[i] = 0.25 * soft[Math.max(0, i - 1)] + 0.5 * soft[i] + 0.25 * soft[Math.min(N - 1, i + 1)];
+      soft.set(tmp);
+    }
+  }
+
+  function draw() {
+    g.clearRect(0, 0, W, H);
+    if (vis < 0.004) return;
+    smooth();
+    const slot = W / N, bw = Math.max(1, slot * 0.46), maxH = H * 0.95;
+
+    g.globalAlpha = vis;                            // fades the whole row in and out
+
+    // 1. A low, soft mound of light that the bars rise out of.
+    const pt = (k) => [(k + 0.5) * slot, H - soft[k] * maxH * 0.75];
+    g.beginPath();
+    g.moveTo(0, H);
+    g.lineTo(0, pt(0)[1]);
+    for (let k = 1; k < N; k++) {
+      const [x0, y0] = pt(k - 1), [x1, y1] = pt(k);
+      g.quadraticCurveTo(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+    }
+    g.lineTo(W, pt(N - 1)[1]);
+    g.lineTo(W, H);
+    g.closePath();
+    const glow = g.createLinearGradient(0, H - maxH * 0.9, 0, H);
+    glow.addColorStop(0, 'rgba(255,255,255,0)');
+    glow.addColorStop(1, 'rgba(255,255,255,0.32)');
+    g.fillStyle = glow;
+    g.fill();
+
+    // 2. Fine bars of light, each fading out toward its top (no hard caps).
+    for (let i = 0; i < N; i++) {
+      const h = soft[i] * maxH;
+      if (h < 1) continue;
+      const x = i * slot + (slot - bw) / 2, y = H - h;
+      const bar = g.createLinearGradient(0, y, 0, H);
+      bar.addColorStop(0, 'rgba(255,255,255,0)');
+      bar.addColorStop(0.55, 'rgba(255,255,255,0.32)');
+      bar.addColorStop(1, 'rgba(255,255,255,0.6)');
+      g.fillStyle = bar;
+      g.fillRect(x, y, bw, h);
+    }
+
+    // 3. Tint everything with the album palette, flowing across the row.
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-in';
+    const tint = g.createLinearGradient(0, 0, W, 0);
+    tint.addColorStop(0, rgba(col[1], 1)); tint.addColorStop(0.3, rgba(col[0], 1));
+    tint.addColorStop(0.5, rgba(col[2], 1)); tint.addColorStop(0.7, rgba(col[0], 1)); tint.addColorStop(1, rgba(col[1], 1));
+    g.fillStyle = tint;
+    g.fillRect(0, 0, W, H);
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  function frame(now) {
+    raf = 0;
+    if (document.hidden) return;
+    if (now - last < FRAME_MS - 2) { raf = requestAnimationFrame(frame); return; }
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    const still = reducedMotion.matches;
+    const ease = (c, t, tau, eps) => { if (still) return t; const n = c + (t - c) * (1 - Math.exp(-dt / tau)); return Math.abs(n - t) < eps ? t : n; };
+    if (mode === 'mic' && !still) listen();
+    vis = ease(vis, visTarget(), 0.9, 0.004);
+    const eT = still ? (state.playing ? 0.5 : 0) : energyTarget();   // reduced motion: a still silhouette
+    energy = ease(energy, eT, eT > energy ? 1.4 : 1.0, 0.006);
+    for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) col[c][k] = ease(col[c][k], want[c][k], 2, 0.5);
+    if (!still && energy > 0) clock += dt * (0.4 + 0.6 * energy);   // the wave slows as it settles
+    let bars = true;
+    for (let i = 0; i < N; i++) {
+      const t = target(i);
+      const tau = mode === 'mic' ? (t > cur[i] ? 0.07 : 0.32) : 0.25;   // mic: quick rise, slow fall
+      cur[i] = ease(cur[i], t, tau, 0.0015);
+      if (cur[i] !== t) bars = false;
+    }
+    draw();
+    const settled = vis === visTarget() && col.every((c, ci) => c.every((v, k) => v === want[ci][k])) &&
+      (still || (mode !== 'mic' && energy === 0 && eT === 0 && bars));
+    if (!settled) raf = requestAnimationFrame(frame);
+  }
+
+  function poke() {
+    if (raf || document.hidden) return;
+    last = performance.now() - FRAME_MS;
+    raf = requestAnimationFrame(frame);
+  }
+
+  async function startMic() {
+    const token = ++mic.token;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('unsupported'), { name: 'NotSupportedError' });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    if (token !== mic.token || mode !== 'mic') { stream.getTracks().forEach((t) => t.stop()); return; }
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const an = ctx.createAnalyser();
+    an.fftSize = 2048;
+    an.smoothingTimeConstant = 0.8;
+    ctx.createMediaStreamSource(stream).connect(an);      // analysed only; never played back
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    Object.assign(mic, { stream, ctx, an, td: new Float32Array(an.fftSize), fd: new Uint8Array(an.frequencyBinCount) });
+    stream.getTracks().forEach((t) => t.addEventListener('ended', () => { if (mode === 'mic' && mic.stream === stream) fallback({ name: 'NotFoundError' }); }));
+    poke();
+  }
+
+  function stopMic() {
+    mic.token++;
+    const s = mic.stream;
+    mic.stream = null;
+    if (s) s.getTracks().forEach((t) => t.stop());
+    if (mic.ctx) mic.ctx.close().catch(() => {});
+    Object.assign(mic, { ctx: null, an: null, level: 0 });
+    mic.bands.fill(0);
+  }
+
+  function fallback(err) {
+    stopMic();
+    mode = 'ambient';
+    settings.visualizer = 'ambient';
+    saveSettings();
+    syncPanel();
+    const name = err && err.name;
+    setVizNote(name === 'NotAllowedError' || name === 'SecurityError' ? 'Microphone access was not allowed, so Ambient is on instead.'
+      : name === 'NotFoundError' || name === 'OverconstrainedError' ? 'No microphone found, so Ambient is on instead.'
+      : 'The microphone isn’t available here, so Ambient is on instead.');
+    poke();
+  }
+
+  async function micGranted() {
+    try { return (await navigator.permissions.query({ name: 'microphone' })).state === 'granted'; } catch { return false; }
+  }
+
+  return {
+    // userChose: true when picked in the panel (may prompt); false on load (only if already allowed).
+    async setMode(next, userChose) {
+      if (next === mode && (next !== 'mic' || mic.stream)) { poke(); return; }
+      if (mode === 'mic' && next !== 'mic') stopMic();
+      mode = next;
+      poke();
+      if (next !== 'mic') return;
+      if (!userChose && !(await micGranted())) {          // never prompt on page load
+        fallback({ name: 'Deferred' });
+        setVizNote('Pick Mic again to allow the microphone.');
+        return;
+      }
+      try { await startMic(); } catch (e) { if (mode === 'mic') fallback(e); }
+    },
+    colours(tint, a, b) {
+      const lift = (c) => mixRgb(mixRgb(c, tint, 0.35), [255, 240, 220], 0.3);
+      want[0] = mixRgb(tint, [255, 240, 220], 0.12); want[1] = lift(a); want[2] = lift(b);
+      poke();
+    },
+    poke,
+    resize,
+    hidden() { if (mic.stream) stopMic(); },                // mic off while the tab is hidden
+    visible() { if (mode === 'mic' && !mic.stream) startMic().catch((e) => { if (mode === 'mic') fallback(e); }); poke(); },
+  };
+})();
+
 /* ───────────────────────── Screen, cursor, input ───────────────────────── */
 
 let wakeLock = null;
@@ -760,7 +1188,7 @@ function nudgeCursor() {
   document.body.classList.remove('cursor-idle');
   clearTimeout(cursorTimer);
   cursorTimer = setTimeout(function hide() {
-    if (document.querySelector('.controls:hover')) { cursorTimer = setTimeout(hide, 1000); return; }
+    if (panel.open || document.querySelector('.controls:hover')) { cursorTimer = setTimeout(hide, 1000); return; }
     document.body.classList.add('cursor-idle');
   }, 3000);
 }
@@ -791,6 +1219,7 @@ function bindInput() {
   $('#controls').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
+    if (btn.dataset.action === 'settings') { toggleSettings(); btn.blur(); return; }
     control(btn.dataset.action);
     btn.blur();                                   // so Space doesn't re-press it
   });
@@ -800,6 +1229,8 @@ function bindInput() {
   addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target;
+    if (e.key === 'Escape' && panel.open) { e.preventDefault(); closeSettings(); return; }
+    if ((e.key === 's' || e.key === 'S') && !(t.closest && t.closest('input, textarea'))) { e.preventDefault(); toggleSettings(); return; }
     if (t.closest && t.closest('input, textarea, .setup, .connect')) return;   // typing / setup
     if (t.closest && t.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
     if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); if (!e.repeat) control('toggle'); }
@@ -808,8 +1239,9 @@ function bindInput() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { stopPolling(); return; }   // no polling while hidden
+    if (document.hidden) { stopPolling(); viz.hidden(); return; }   // no polling, no mic while hidden
     acquireWakeLock();
+    viz.visible();
     drawClock();
     pollNow();
   });
@@ -824,6 +1256,7 @@ function bindInput() {
   });
 
   reducedMotion.addEventListener('change', () => { spin.set(false); render(); });
+  addEventListener('resize', viz.resize);
 
   // Sleep/wake watchdog: timers stall during sleep, so notice the gap and resume right away.
   // Also revives polling if it ever stopped for an unexpected reason.
@@ -860,6 +1293,9 @@ async function start() {
   }
   bindInput();
   bindSetup();
+  bindSettings();
+  viz.resize();
+  applySettings();
   drawClock();
   drawEvening();
   setPalette(null);
@@ -875,6 +1311,7 @@ async function start() {
   if (setMode() !== 'live') return;
   if (auth.access) scheduleRefresh();
   pollNow();
+  loadAccount();
 }
 
 start();
