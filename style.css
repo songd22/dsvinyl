@@ -1,0 +1,413 @@
+/* dsvinyl — a cozy now-playing scene. Everything is CSS/SVG; the album art is the only image. */
+
+@property --tint { syntax: '<color>'; inherits: true; initial-value: rgb(255 184 102); }
+@property --glow { syntax: '<number>'; inherits: true; initial-value: 1; }
+
+:root {
+  --tint: rgb(255 184 102);            /* lamp colour, nudged toward the album by app.js */
+  --glow: 1;                           /* 1 = playing, lower = idle / paused */
+  --ui: rgb(255 243 226 / .88);
+  --ui-dim: rgb(255 243 226 / .55);
+  --font: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --ease: cubic-bezier(.45, 0, .2, 1);
+
+  --walnut-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='420'><filter id='w' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='0.0028 0.085' numOctaves='5' seed='11'/><feColorMatrix values='0 0 0 0 .13 0 0 0 0 .065 0 0 0 0 .025 2.9 0 0 0 -1.12'/></filter><rect width='100%' height='100%' filter='url(%23w)'/></svg>");
+  --walnut-pores: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='300'><filter id='p' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='0.012 0.75' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 .08 0 0 0 0 .04 0 0 0 0 .02 3.2 0 0 0 -1.6'/></filter><rect width='100%' height='100%' filter='url(%23p)'/></svg>");
+  --film-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+
+  transition: --tint 4s ease, --glow 3.5s ease;
+}
+:root.dim { --glow: .72; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #1c150f; }
+body { font-family: var(--font); color: var(--ui); -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+body.cursor-idle, body.cursor-idle * { cursor: none !important; }
+
+/* ───────────────────────── Room ───────────────────────── */
+
+.room { position: fixed; inset: 0; overflow: hidden; }
+
+.wall {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 80vmax 70vmax at 95% 100%, rgb(36 24 14 / .6), transparent 70%),
+    linear-gradient(100deg, rgb(0 0 0 / 0) 30%, rgb(30 20 12 / .28) 100%),
+    linear-gradient(180deg, #a3988a 0%, #ada291 45%, #9c907f 100%);
+}
+
+/* Warm light from a lamp just out of frame, upper left. */
+.lamp {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 62vmax 52vmax at 14% -4%,
+      color-mix(in oklab, var(--tint) 70%, #fff 30%) 0%,
+      color-mix(in oklab, var(--tint) 60%, transparent) 26%,
+      color-mix(in oklab, var(--tint) 16%, transparent) 58%,
+      transparent 78%),
+    radial-gradient(ellipse 140vmax 100vmax at 22% 0%, color-mix(in oklab, var(--tint) 34%, transparent), transparent 72%);
+  mix-blend-mode: soft-light;
+  opacity: calc(.55 + var(--glow) * .45);
+}
+.lamp::before {              /* warm the wall's colour where the lamp reaches */
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 85vmax 75vmax at 14% -6%, color-mix(in oklab, var(--tint) 75%, transparent), color-mix(in oklab, var(--tint) 30%, transparent) 50%, transparent 80%);
+  mix-blend-mode: multiply;
+  opacity: calc(.35 + var(--glow) * .35);
+}
+.lamp::after {               /* a little true light on top of the blend, for the golden bloom */
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 58vmax 50vmax at 13% -6%, color-mix(in oklab, var(--tint) 58%, transparent), color-mix(in oklab, var(--tint) 18%, transparent) 55%, transparent 75%),
+    radial-gradient(ellipse 30vmax 24vmax at 8% -2%, color-mix(in oklab, var(--tint) 50%, #fff 10%), transparent 70%);
+  mix-blend-mode: screen;
+  opacity: calc(var(--glow) * .85);
+}
+
+/* Everything in the scene is laid out in a 100×100 vmin box, so it scales with the screen. */
+.scene {
+  position: absolute; left: 50%; top: 50%;
+  width: 100vmin; height: 100vmin; margin: -50vmin 0 0 -50vmin;
+  perspective: 140vmin;
+  perspective-origin: 60% 8%;
+}
+@media (min-aspect-ratio: 5/4) { .scene { transform: scale(1.1); } }
+@media (min-aspect-ratio: 3/2) { .scene { transform: scale(1.18); } }
+
+/* ───────────────────────── Shelf ───────────────────────── */
+
+.shelf { position: absolute; top: 60vmin; left: -200vmax; right: -200vmax; height: 400vmax; pointer-events: none; }
+.shelf-top {
+  height: 13vmin;
+  background:
+    linear-gradient(180deg, rgb(0 0 0 / .45) 0, transparent 1.4vmin),                  /* contact with the wall */
+    radial-gradient(ellipse 80vmin 12vmin at calc(200vmax + 25vmin) 35%, color-mix(in oklab, var(--tint) 20%, transparent), transparent 70%),
+    linear-gradient(180deg, #2e2722 0%, #383029 60%, #3e352d 100%);
+}
+.shelf-edge {                /* the slab's front edge, catching the lamp */
+  height: 2.4vmin;
+  background:
+    linear-gradient(180deg, rgb(255 228 186 / .26) 0, rgb(255 228 186 / .06) .22vmin, transparent .45vmin),
+    radial-gradient(ellipse 90vmin 4vmin at calc(200vmax + 10vmin) 0, color-mix(in oklab, var(--tint) 14%, transparent), transparent 70%),
+    linear-gradient(180deg, #2f2823 0%, #26201b 100%);
+}
+.shelf-under {                /* cabinet body, set back slightly under the slab */
+  height: 100%;
+  background:
+    linear-gradient(180deg, rgb(6 4 2 / .85) 0, rgb(6 4 2 / 0) 1.6vmin),
+    radial-gradient(ellipse 110vmin 40vmin at calc(200vmax + 5vmin) 0, color-mix(in oklab, var(--tint) 8%, transparent), transparent 70%),
+    linear-gradient(180deg, #221c17 0, #1a1511 30vmin, #15110d 60vmin);
+}
+
+/* ───────────────────────── Sleeve ───────────────────────── */
+
+.sleeve {
+  position: absolute; left: 5vmin; top: 29.5vmin;
+  width: 31vmin; height: 31vmin;
+  transform-origin: 50% 100%;
+  transform: rotateY(17deg) rotateX(6deg);
+  background: #d9cdb8;
+  border-radius: .25vmin;
+  pointer-events: none;
+}
+.sleeve::before {             /* thin cardboard edges: top and left catch the lamp */
+  content: ""; position: absolute; left: -.28vmin; top: -.34vmin; right: .05vmin; bottom: .05vmin;
+  border-radius: .3vmin;
+  background: linear-gradient(135deg, #e6d8bf 0%, #cdbea4 40%, #ad9d84 100%);
+  box-shadow: -.05vmin -.05vmin .1vmin rgb(70 50 30 / .35);
+}
+.sleeve-blank {
+  position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(circle at 50% 50%, rgb(0 0 0 / .06) 0 30%, transparent 30.5%), linear-gradient(135deg, #e7dcc8, #c9bba3);
+}
+.art {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; border-radius: inherit;
+  opacity: 0; transition: opacity 1.4s ease;
+}
+.art.on { opacity: 1; }
+.sleeve-wear {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background:
+    linear-gradient(120deg, transparent 18%, rgb(255 248 236 / .045) 34%, rgb(255 248 236 / .015) 50%, transparent 62%),
+    radial-gradient(circle at 50% 50%, transparent 45.8%, rgb(255 250 240 / .04) 47%, transparent 48.4%),  /* faint ring wear */
+    linear-gradient(160deg, color-mix(in oklab, var(--tint) 10%, transparent), transparent 45%, rgb(0 0 0 / .16));
+  box-shadow: inset 0 0 .45vmin rgb(255 248 235 / .16), inset 0 0 0 .07vmin rgb(255 248 235 / .1);
+}
+.sleeve-shadow {             /* cast on the wall: tight at the top where it touches, softer below */
+  position: absolute; left: 9vmin; top: 30vmin; width: 30vmin; height: 30vmin;
+  background: rgb(28 16 6 / .5);
+  filter: blur(1.5vmin);
+  transform: skewX(-8deg) translateX(2.4vmin);
+  transform-origin: 50% 0;
+  border-radius: 1vmin;
+  pointer-events: none;
+}
+.sleeve-contact {
+  position: absolute; left: 4vmin; top: 59.2vmin; width: 37vmin; height: 2.6vmin;
+  background: radial-gradient(ellipse 50% 50% at 55% 40%, rgb(0 0 0 / .6), transparent 75%);
+  filter: blur(.5vmin);
+  pointer-events: none;
+}
+
+/* ───────────────────────── Turntable ───────────────────────── */
+
+.deck-shadow {
+  position: absolute; left: 35vmin; top: 61.5vmin; width: 55vmin; height: 10vmin;
+  background: radial-gradient(ellipse 50% 50% at 54% 50%, rgb(0 0 0 / .62), rgb(0 0 0 / .25) 55%, transparent 75%);
+  filter: blur(1.2vmin);
+  pointer-events: none;
+}
+.deck {
+  position: absolute; left: 36vmin; top: 31vmin;
+  width: 50vmin; height: 36vmin;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+.deck * { transform-style: preserve-3d; }
+
+.plinth-top, .plinth-front {
+  position: absolute; left: 0; width: 100%;
+  background:
+    var(--walnut-pores) 0 0 / 46vmin 23vmin,
+    var(--walnut-grain) 0 0 / 70vmin 33vmin,
+    linear-gradient(90deg, #6a4329, #5b3920 30%, #6d452a 60%, #573620);
+}
+.plinth-top {
+  top: 0; height: 100%;
+  transform-origin: 50% 100%;
+  transform: rotateX(60deg);
+  border-radius: .5vmin;
+  box-shadow: inset 0 0 0 .12vmin rgb(255 210 160 / .12), inset .25vmin .25vmin .4vmin rgb(255 210 160 / .08);
+}
+.plinth-sheen {               /* satin oil finish catching the lamp */
+  position: absolute; inset: 0; border-radius: inherit;
+  background:
+    radial-gradient(ellipse 70% 90% at 10% 0%, color-mix(in oklab, var(--tint) 26%, transparent), transparent 70%),
+    linear-gradient(180deg, rgb(255 220 170 / .05), rgb(0 0 0 / .14));
+  opacity: calc(.6 + var(--glow) * .4);
+}
+.plinth-front {
+  top: 100%; height: 6.4vmin;
+  transform-origin: 50% 0;
+  transform: rotateX(-30deg);
+  background-position: 0 -20vmin, 0 -11vmin, 0 0;
+  border-radius: 0 0 .4vmin .4vmin;
+  box-shadow: inset 0 .14vmin 0 rgb(255 218 170 / .30), inset 0 -2vmin 2.6vmin rgb(0 0 0 / .42);
+}
+.plinth-front::after {        /* front face sits in its own shade */
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(180deg, rgb(0 0 0 / .12), rgb(0 0 0 / .38));
+}
+.foot {
+  position: absolute; bottom: -1vmin; width: 4.5vmin; height: 1.1vmin;
+  background: linear-gradient(180deg, #1e1915, #0c0a08);
+  border-radius: 0 0 .4vmin .4vmin;
+}
+.foot.left { left: 3vmin; } .foot.right { right: 3vmin; }
+
+/* Platter + record. Stacked rims at rising Z draw the brushed-metal edge. */
+.platter { position: absolute; left: 3vmin; top: 1vmin; width: 34vmin; height: 34vmin; }
+.rim, .platter-top, .record-lift, .record-sheen, .spindle { position: absolute; border-radius: 50%; }
+.rim {
+  inset: 0;
+  transform: translateZ(calc(var(--z) * 1vmin));
+  background: linear-gradient(90deg, #5d5b57 0%, #9c9a95 16%, #e9e7e1 34%, #8d8b86 52%, #f3f0e8 70%, #a29f99 84%, #55524e 100%);
+}
+.rim:first-child { box-shadow: 0 0 1.4vmin .4vmin rgb(0 0 0 / .45); }
+.platter-top {
+  inset: 0;
+  transform: translateZ(1.5vmin);
+  background:
+    repeating-radial-gradient(circle, rgb(255 255 255 / .06) 0 .1vmin, transparent .1vmin .22vmin),
+    conic-gradient(from 200deg, #9b9993, #e6e3dc 40deg, #a19f99 90deg, #8a8883 160deg, #d8d5ce 230deg, #94928c 300deg, #9b9993);
+}
+.record-lift { inset: 1vmin; transform: translateZ(1.6vmin); }
+.record {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: #0c0c0d;
+  box-shadow: 0 0 0 .08vmin rgb(255 255 255 / .06), 0 .2vmin .5vmin rgb(0 0 0 / .5);
+  pointer-events: auto; cursor: pointer;
+  will-change: transform;
+}
+.grooves {
+  position: absolute; inset: 0; border-radius: 50%;
+  background:
+    /* smooth lead-in edge, run-out area and a couple of track gaps */
+    radial-gradient(circle closest-side, transparent 0 41%, rgb(255 255 255 / .035) 41.5% 42.5%, transparent 43% 63%, rgb(255 255 255 / .04) 63.4% 63.9%, transparent 64.3% 79%, rgb(255 255 255 / .035) 79.3% 79.8%, transparent 80.2% 96.6%, rgb(255 255 255 / .05) 97% 100%),
+    /* the faintest bit of asymmetry, so the spin reads */
+    conic-gradient(from 30deg, rgb(255 255 255 / .018), transparent 25%, rgb(255 255 255 / .012) 50%, transparent 70%, rgb(255 255 255 / .018)),
+    /* fine grooves */
+    repeating-radial-gradient(circle closest-side, #121213 0, #0d0d0e .6%, #121213 1.2%);
+}
+.label {
+  position: absolute; left: 32.5%; top: 32.5%; width: 35%; height: 35%;
+  border-radius: 50%; overflow: hidden;
+  box-shadow: 0 0 0 .1vmin rgb(0 0 0 / .5);
+}
+.label-blank { position: absolute; inset: 0; background: radial-gradient(circle, #efe6d6 0 30%, #e2d6c1 31% 100%); }
+.label-shade {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: radial-gradient(circle, rgb(0 0 0 / .18) 0 4%, transparent 9%, transparent 88%, rgb(0 0 0 / .22) 100%);
+}
+
+/* A soft highlight that stays put while the record turns — the lamp reflected in the grooves. */
+.record-sheen {
+  inset: 1vmin;
+  transform: translateZ(1.64vmin);
+  pointer-events: none;
+  background:
+    conic-gradient(from 0deg,
+      transparent 0deg, transparent 292deg,
+      rgb(255 238 210 / .05) 302deg,
+      rgb(255 246 232 / .2) 312deg,
+      rgb(255 238 210 / .05) 322deg,
+      transparent 334deg),
+    conic-gradient(from 0deg,
+      transparent 0deg, transparent 98deg,
+      rgb(255 240 220 / .03) 122deg, rgb(255 240 220 / .09) 132deg, rgb(255 240 220 / .03) 142deg,
+      transparent 154deg, transparent 360deg),
+    radial-gradient(ellipse 60% 50% at 28% 20%, color-mix(in oklab, var(--tint) 12%, transparent), transparent 70%);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 0 34.6%, #000 36%, #000 97%, transparent 99.5%);
+          mask: radial-gradient(circle closest-side, transparent 0 34.6%, #000 36%, #000 97%, transparent 99.5%);
+  opacity: calc(.55 + var(--glow) * .45);
+}
+.spindle {
+  left: calc(50% - .45vmin); top: calc(50% - .45vmin); width: .9vmin; height: .9vmin;
+  transform: translateZ(2.3vmin);
+  background: radial-gradient(circle at 35% 30%, #fff, #bdbab3 45%, #5e5b56);
+  box-shadow: .15vmin .2vmin .3vmin rgb(0 0 0 / .55);
+}
+
+/* Small hardware */
+.knob {
+  position: absolute; left: 45.8vmin; top: 31.6vmin; width: 2.3vmin; height: 2.3vmin; border-radius: 50%;
+  transform: translateZ(.7vmin);
+  background:
+    linear-gradient(transparent 46%, #333 46% 54%, transparent 54%) 50% 15% / 8% 35% no-repeat,
+    repeating-conic-gradient(from 0deg, #d3d0c9 0 2deg, #b4b1aa 2deg 4deg),
+    #c4c1ba;
+  box-shadow: 0 .35vmin 0 #77746e, 0 .5vmin .4vmin rgb(0 0 0 / .5), inset 0 0 0 .1vmin rgb(255 255 255 / .35);
+}
+.arm-rest, .pivot-base { position: absolute; }
+.arm-rest { left: 43.6vmin; top: 25.6vmin; width: 1.8vmin; height: 1.8vmin; }
+.pivot-base { left: 42vmin; top: 4.5vmin; width: 5vmin; height: 5vmin; }
+.arm-rest i, .pivot-base i, .arm-rest b, .pivot-base b {
+  position: absolute; inset: 0; border-radius: 50%;
+  transform: translateZ(calc(var(--z) * 1vmin));
+  background: linear-gradient(90deg, #4f4d49, #c9c6bf 35%, #7d7b76 70%, #44423f);
+}
+.arm-rest i:first-child, .pivot-base i:first-child { box-shadow: .3vmin .4vmin .6vmin rgb(0 0 0 / .55); }
+.arm-rest b { transform: translateZ(1.9vmin); background: radial-gradient(circle at 40% 35%, #3a3835, #121110); }
+.pivot-base b { transform: translateZ(1.8vmin); background: radial-gradient(circle at 38% 32%, #ece9e2, #a6a39c 55%, #5c5955); }
+
+/* Tonearm: app.js sets the swing angle and lift. Pivot sits at (44.5, 7) on the plinth. */
+.arm, .arm-shadow {
+  position: absolute; left: 39.5vmin; top: -1vmin;
+  width: 10vmin; height: 33vmin;
+  transform-origin: 5vmin 8vmin;
+  overflow: visible;
+}
+.arm { transform: translateZ(3vmin); pointer-events: none; }
+.arm .hit { pointer-events: auto; cursor: pointer; }
+.arm-shadow {
+  transform: translateZ(1.7vmin) translate(.8vmin, .7vmin);
+  filter: blur(.35vmin);
+  opacity: .5;
+  pointer-events: none;
+}
+
+/* ───────────────────────── Atmosphere ───────────────────────── */
+
+.grain {
+  position: absolute; inset: -50%;
+  background: var(--film-grain) 0 0 / 256px 256px;
+  opacity: .07; mix-blend-mode: overlay; pointer-events: none;
+  animation: grain 1.2s steps(6) infinite;
+}
+@keyframes grain {
+  0% { transform: translate(0, 0); } 17% { transform: translate(-3%, 2%); } 33% { transform: translate(2%, -4%); }
+  50% { transform: translate(-4%, -1%); } 67% { transform: translate(3%, 3%); } 83% { transform: translate(-1%, 4%); }
+  100% { transform: translate(0, 0); }
+}
+.vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 120% 100% at 45% 40%, transparent 50%, rgb(12 7 3 / .55) 100%);
+}
+.dimmer {                     /* idle: the room settles a touch darker */
+  position: absolute; inset: 0; pointer-events: none;
+  background: rgb(18 11 5);
+  opacity: calc((1 - var(--glow)) * .55);
+}
+
+/* ───────────────────────── Text ───────────────────────── */
+
+.meta {
+  position: fixed; left: max(4vmin, 20px); bottom: max(4vmin, 20px);
+  max-width: min(60vw, 70vmin);
+  pointer-events: none;
+  transition: opacity .5s ease;
+}
+.meta-title, .meta-artist { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta-title { font-size: max(1.75vmin, 12px); font-weight: 500; letter-spacing: .01em; color: var(--ui); }
+.meta-artist { margin-top: .5vmin; font-size: max(1.4vmin, 10.5px); font-weight: 400; letter-spacing: .02em; color: var(--ui-dim); }
+.meta.swap { opacity: 0; }
+@media (max-aspect-ratio: 1/1) {     /* portrait: sit quietly below the scene, centred */
+  .meta { left: 50%; bottom: auto; top: calc(50% + 32vmin); transform: translateX(-50%); text-align: center; max-width: 86vw; }
+}
+:root.dim .meta { opacity: .7; }
+:root.dim .meta.swap, :root.skipping .meta { opacity: .3; }
+
+/* ───────────────────────── Controls ───────────────────────── */
+
+.controls {
+  position: fixed; left: 50%; bottom: max(3.4vmin, 16px);
+  transform: translateX(-50%);
+  display: flex; gap: max(1vmin, 6px); align-items: center;
+  padding: max(.6vmin, 4px) max(1.2vmin, 8px);
+  border-radius: 999px;
+  background: rgb(22 15 9 / .32);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow: inset 0 0 0 1px rgb(255 240 220 / .07);
+  opacity: 1; transition: opacity .6s ease;
+}
+body.cursor-idle .controls { opacity: 0; pointer-events: none; transition-duration: 1.2s; }
+.controls button {
+  display: grid; place-items: center;
+  width: max(4.2vmin, 34px); height: max(4.2vmin, 34px);
+  padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--ui); cursor: pointer;
+  transition: background .2s ease, transform .2s ease;
+}
+.controls button:hover { background: rgb(255 240 220 / .08); }
+.controls button:active { transform: scale(.92); }
+.controls button:focus-visible { outline: 1px solid rgb(255 240 220 / .5); outline-offset: 2px; }
+.controls svg { width: 46%; height: 46%; fill: currentColor; }
+.controls [data-action="toggle"] svg { width: 52%; height: 52%; }
+.icon-pause { display: none; }
+:root.playing .icon-pause { display: block; }
+:root.playing .icon-play { display: none; }
+
+.connect {
+  position: fixed; left: 50%; bottom: max(4vmin, 20px); transform: translateX(-50%);
+  padding: max(.9vmin, 8px) max(2vmin, 16px);
+  border: 1px solid rgb(255 240 220 / .18); border-radius: 999px;
+  background: rgb(22 15 9 / .4);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  color: var(--ui); font: 500 max(1.35vmin, 12px)/1 var(--font); letter-spacing: .03em;
+  cursor: pointer !important;
+  transition: background .2s ease, border-color .2s ease;
+}
+.connect:hover { background: rgb(40 28 16 / .55); border-color: rgb(255 240 220 / .3); }
+.connect:disabled { cursor: default !important; color: var(--ui-dim); }
+.connect[hidden] { display: none; }
+body.cursor-idle .connect { cursor: none; }
+.connect:not([hidden]) ~ .controls, body:has(.connect:not([hidden])) .controls { display: none; }
+
+/* ───────────────────────── Reduced motion ───────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  :root { transition: none; }
+  .grain { animation: none; }
+  .art { transition-duration: .3s; }
+}
