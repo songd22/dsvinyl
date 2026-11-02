@@ -483,7 +483,7 @@ function choreograph(track, img) {
   choreoTimers.forEach(clearTimeout);
   els.pair.classList.add('swap');
   els.meta.classList.add('out');
-  viz.poke();
+  glow.poke();
   choreoTimers = [
     setTimeout(() => { applyArt(img, track.art); setText(track); drawProgress(true); els.meta.classList.remove('out'); }, 560),
     setTimeout(() => els.pair.classList.remove('swap'), 700),
@@ -619,7 +619,7 @@ function setPalette(img) {
   }
   mesh.forEach((c, i) => root.style.setProperty(`--m${i}`, cssRgb(c)));
   root.style.setProperty('--tint', cssRgb(tint));
-  viz.colours(tint, mesh);
+  glow.colours(tint, mesh);
 }
 
 /* ───────────────────────── Progress, clock, evening, drift ───────────────────────── */
@@ -697,7 +697,7 @@ function render() {
   els.toggle.setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
   spin.set(state.playing);
   drawProgress();
-  viz.poke();
+  glow.poke();
 }
 
 // Which screen: first-run setup, "Connect Spotify", or the live display.
@@ -708,7 +708,7 @@ function setMode() {
   els.setup.hidden = mode !== 'setup';
   els.connect.hidden = mode !== 'connect';
   if (mode === 'setup') $('#redirectUri').textContent = REDIRECT_URI;
-  viz.poke();
+  glow.poke();
   if (panel.open) syncPanel();
   return mode;
 }
@@ -766,8 +766,8 @@ function bindSetup() {
  * applySettings(). Everything is saved to localStorage and applied at once. */
 
 const DEFAULTS = Object.freeze({
-  visualizer: 'ambient',                       // 'off' | 'ambient' | 'mic'
-  intensity: 'normal',                         // 'subtle' | 'normal' | 'vivid'
+  glow: true,
+  glowIntensity: 50,                           // 0–100: brightness and how much the light moves
   clock: true,
   clockFormat: new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12 ? '12' : '24',
   clockDate: true,
@@ -776,24 +776,38 @@ const DEFAULTS = Object.freeze({
   eveningEnd: '06:00',
   progress: true,
 });
-const CHOICES = { visualizer: ['off', 'ambient', 'mic'], intensity: ['subtle', 'normal', 'vivid'], clockFormat: ['12', '24'] };
+const CHOICES = { clockFormat: ['12', '24'] };
 const isTime = (v) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 
 function loadSettings() {
-  let saved = {};
-  try { saved = JSON.parse(store.get(K.settings) || '{}') || {}; } catch { saved = {}; }
+  let saved = {}, broken = false;
+  try { saved = JSON.parse(store.get(K.settings) || '{}') || {}; } catch { saved = {}; broken = true; }
+  if (typeof saved !== 'object' || Array.isArray(saved)) { saved = {}; broken = true; }
+  // Older versions had a visualizer (Off / Ambient / Mic) and a named intensity. Keep an explicit
+  // "Off"; anything else (including Mic) becomes the glow, and intensity returns to its default.
+  if ('visualizer' in saved && !('glow' in saved)) saved.glow = saved.visualizer !== 'off';
+  const migrated = broken || 'visualizer' in saved || 'intensity' in saved;
   const out = { ...DEFAULTS };
   for (const key of Object.keys(DEFAULTS)) {
     const v = saved[key];
     if (v === undefined || typeof v !== typeof DEFAULTS[key]) continue;
     if (CHOICES[key] && !CHOICES[key].includes(v)) continue;
     if (/^evening(Start|End)$/.test(key) && !isTime(v)) continue;
-    out[key] = v;
+    if (typeof v === 'number' && !Number.isFinite(v)) continue;
+    out[key] = key === 'glowIntensity' ? Math.round(clamp(v, 0, 100)) : v;
   }
+  const tidy = migrated || Object.keys(saved).some((k) => k in DEFAULTS && saved[k] !== out[k]);
+  if (tidy) store.set(K.settings, JSON.stringify(out));       // tidy old or invalid values away
   return out;
 }
 let settings = loadSettings();
 function saveSettings() { store.set(K.settings, JSON.stringify(settings)); }
+
+// The slider's filled part, drawn with a gradient so it looks the same in every browser.
+function paintRange(input) {
+  const p = ((Number(input.value) - Number(input.min || 0)) / ((Number(input.max || 100) - Number(input.min || 0)) || 1)) * 100;
+  input.style.setProperty('--fill', `${p}%`);
+}
 
 function setSetting(key, value) {
   if (settings[key] === value) return;
@@ -817,11 +831,7 @@ function applySettings(changed) {
     }
     drawEvening();
   }
-  if (changed === 'intensity') viz.poke();
-  if (!changed || changed === 'visualizer') {
-    if (changed === 'visualizer') setVizNote('');
-    viz.setMode(settings.visualizer, !!changed);
-  }
+  if (!changed || /^glow/.test(changed)) glow.poke();
 }
 
 /* Panel */
@@ -857,7 +867,7 @@ function syncPanel() {
     const v = settings[el.dataset.setting];
     if (el.classList.contains('switch')) el.setAttribute('aria-checked', String(!!v));
     else if (el.classList.contains('seg')) el.querySelectorAll('[data-value]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.value === v)));
-    else if (el.tagName === 'INPUT' && document.activeElement !== el) el.value = v;
+    else if (el.tagName === 'INPUT' && document.activeElement !== el) { el.value = v; if (el.type === 'range') paintRange(el); }
   });
   panel.el.querySelectorAll('[data-requires]').forEach((row) => {
     const [key, not] = row.dataset.requires.split('!=');
@@ -875,7 +885,6 @@ function syncPanel() {
   $('#resetBtn').disabled = !clientId() && !live;
 }
 
-function setVizNote(text) { $('#vizNote').textContent = text; }
 
 async function loadAccount(force) {
   if (!clientId() || auth.dead || !(auth.refresh || auth.access)) return;
@@ -901,6 +910,11 @@ function bindSettings() {
     if (sw) { setSetting(sw.dataset.setting, !settings[sw.dataset.setting]); return; }
     const opt = e.target.closest('.seg [data-value]');
     if (opt) { setSetting(opt.closest('.seg').dataset.setting, opt.dataset.value); }
+  });
+  panel.el.querySelectorAll('input[type="range"][data-setting]').forEach((input) => {
+    const set = () => { setSetting(input.dataset.setting, Number(input.value)); paintRange(input); };
+    input.addEventListener('input', set);            // live while dragging
+    input.addEventListener('change', set);
   });
   panel.el.querySelectorAll('input[type="time"][data-setting]').forEach((input) => {
     input.addEventListener('change', () => { if (isTime(input.value)) setSetting(input.dataset.setting, input.value); });
@@ -929,56 +943,40 @@ function bindSettings() {
   $('#restoreBtn').addEventListener('click', () => {
     settings = { ...DEFAULTS };
     saveSettings();
-    setVizNote('');
     applySettings();
     syncPanel();
   });
 }
 
-/* ───────────────────────── Visualizer ─────────────────────────
- * Light, not shapes. One low-resolution canvas (it's all soft light, so the browser's
- * upscaling only softens it further), blended with "screen" over the scene:
- *   • a luminous glow along the bottom edge, built from soft light pools that mirror out
- *     from the centre (bass in the middle, highs at the edges) and drift slowly sideways;
- *   • a few diffuse glints drifting across the exposed part of the disc.
- * Mic: 8 log-spaced bands → adaptive gain (rolling floor/peak) with a noise gate →
- * fast-attack / slow-release envelopes → perceptual curve; kicks flash the light.
- * Ambient: the same visuals, driven by smooth noise and an occasional gentle swell.
- * Press D for a debug overlay with the band levels and gain ranges. */
+/* ───────────────────────── Glow ─────────────────────────
+ * One calm ambient light. A few large, soft pools of light in the album's colours drift
+ * slowly around the lower part of the scene and around the disc, and a soft sheen slides
+ * across the record, taking its colour from whichever light is nearest.
+ *
+ * Safety by construction: every brightness change is eased over at least ~1 s, and the
+ * fastest movement or variation in it has a period of roughly 40 s or longer. Nothing flashes.
+ *
+ * One low-resolution canvas, at most 24 fps, and it stops drawing entirely once settled
+ * (paused, idle or off). Reduced motion: lights and sheen hold still; fades still apply. */
 
-const viz = (() => {
-  const canvas = $('#viz');
+const glow = (() => {
+  const canvas = $('#light');
   const g = canvas.getContext('2d');
-  const SCALE = 0.3;
-  const FRAME_MS = 1000 / 30;
-  const BANDS = 8;
-  const INTENSITY = { subtle: { a: 0.6, h: 0.85 }, normal: { a: 1, h: 1 }, vivid: { a: 1.45, h: 1.12 } };
-  const ATTACK = 0.03, RELEASE = 0.42;          // seconds
-  const CURVE = 1.7;                            // soft passages stay calm, peaks bloom
-  const PEAK_TAU = 10;                          // seconds for a peak to decay back toward the floor
-  const MIN_RANGE = 14, GATE_DB = 3, ABS_GATE = -88;   // dB
+  const SCALE = 0.25;                         // soft light needs few pixels; upscaling softens it more
+  const FRAME_MS = 1000 / 24;
+  const BLEND_MS = 6000;                      // matches the background's palette transition
+  const N = 4;
+  let W = 0, H = 0, raf = 0, last = 0;
+  let t = Math.random() * 500;                // drift clock; advances with playback
+  let vis = 0, play = 0, gain = 0, roam = 1;  // eased: visibility, playing, intensity, how far lights wander
+  const seeds = Array.from({ length: N + 2 }, () => Math.random() * 100);
+  const warm = [255, 196, 140];
+  const pal = { from: [], to: [], now: [], t0: -1e9 };
+  for (let i = 0; i < N; i++) { pal.from.push(warm.slice()); pal.to.push(warm.slice()); pal.now.push(warm.slice()); }
 
-  let W = 0, H = 0, mode = 'off', raf = 0, last = 0, t = 0, vis = 0, play = 0;
-  let debugOn = false, debugTick = 0;
-  const level = new Float32Array(BANDS);        // what the light shows, 0–1 (after the curve)
-  const env = new Float32Array(BANDS);          // envelopes, 0–1
-  let flash = 0;
-  const seeds = Array.from({ length: BANDS * 2 + 6 }, () => Math.random() * 100);
-  const swell = { v: 0, phase: -1, next: 12 + Math.random() * 18, amp: 0.4 };
-  const glints = Array.from({ length: 4 }, (_, i) => ({ phase: Math.random() * 6.28, speed: 0.05 + i * 0.017, seed: Math.random() * 100 }));
-
-  const palette = { now: [], want: [] };
-  for (let b = 0; b < BANDS; b++) { palette.now.push([255, 190, 120]); palette.want.push([255, 190, 120]); }
-  const glintCol = { now: [255, 226, 190], want: [255, 226, 190] };
-
-  const mic = {
-    stream: null, ctx: null, an: null, spec: null, td: null, token: 0,
-    db: new Float32Array(BANDS).fill(-100), floor: new Float32Array(BANDS).fill(-70), peak: new Float32Array(BANDS).fill(-50),
-    norm: new Float32Array(BANDS), lastOnset: 0, input: -100, edges: [], lowHist: [-100, -100, -100], flux: 1,
-  };
-
-  // Smooth noise in 0–1: a few incommensurate sines.
+  // Smooth noise in 0–1. Callers keep the rate low, so even its fastest part stays slow.
   const noise = (x, s) => 0.5 + 0.25 * Math.sin(x + s) + 0.15 * Math.sin(x * 1.73 + s * 2.1) + 0.1 * Math.sin(x * 2.97 + s * 3.7);
+  const easeInOut = (k) => 0.5 - Math.cos(Math.PI * k) / 2;
 
   function resize() {
     W = canvas.width = Math.max(1, Math.round(innerWidth * SCALE));
@@ -986,93 +984,25 @@ const viz = (() => {
     poke();
   }
 
-  const visTarget = () => (mode === 'off' || root.classList.contains('idle') || root.classList.contains('setup-mode') || root.classList.contains('connect-mode') ? 0 : 1);
+  const quiet = () => root.classList.contains('idle') || root.classList.contains('setup-mode') || root.classList.contains('connect-mode');
+  const visTarget = () => (quiet() ? 0.08 : 1);                       // idle: almost out
+  const gainTarget = () => (settings.glow ? settings.glowIntensity / 50 : 0);   // 0 … 2, 1 at the default
+  const roamTarget = () => 0.25 + 0.75 * Math.min(1, settings.glowIntensity / 50) + 0.5 * Math.max(0, settings.glowIntensity / 50 - 1);
 
-  /* ── Mic analysis ── */
+  const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${Math.min(0.85, Math.max(0, a)).toFixed(4)})`;
 
-  function listen(dt) {
-    if (!mic.an) return;
-    mic.an.getFloatFrequencyData(mic.spec);     // dB per bin
-    mic.an.getFloatTimeDomainData(mic.td);
-    let sum = 0;
-    for (let i = 0; i < mic.td.length; i++) sum += mic.td[i] * mic.td[i];
-    mic.input = 20 * Math.log10(Math.sqrt(sum / mic.td.length) + 1e-9);
-    const silent = mic.input < -66;                       // room silence reads as nothing
-    // Band energy, then a gentle tilt (+4.5 dB per band) so the loudest band can be compared
-    // fairly across the spectrum: music naturally has less energy per bin up high.
-    let loudest = -200;
-    for (let b = 0; b < BANDS; b++) {
-      const [lo, hi] = mic.edges[b];
-      let p = 0;
-      for (let k = lo; k <= hi; k++) p += Math.pow(10, mic.spec[k] / 10);
-      mic.db[b] = 10 * Math.log10(p / (hi - lo + 1) + 1e-12);
-      loudest = Math.max(loudest, mic.db[b] + 4.5 * b);
-    }
-    for (let b = 0; b < BANDS; b++) {
-      const db = mic.db[b];
-      // Adaptive gain: the floor follows the quiet level (falls fast, rises slowly); the peak
-      // jumps up instantly and relaxes toward the floor over ~10 s.
-      if (db < mic.floor[b]) mic.floor[b] += (db - mic.floor[b]) * Math.min(1, dt / 0.5);
-      else mic.floor[b] += (db - mic.floor[b]) * Math.min(1, dt / 8);
-      if (db > mic.peak[b]) mic.peak[b] = db;
-      else mic.peak[b] += (mic.floor[b] - mic.peak[b]) * Math.min(1, dt / PEAK_TAU);
-      const range = Math.max(MIN_RANGE, mic.peak[b] - mic.floor[b]);
-      // Noise gate: room silence, and bands holding only faint leakage (30 dB+ under the
-      // loudest), read as nothing instead of being amplified into light.
-      const significant = clamp((db + 4.5 * b - (loudest - 30)) / 10, 0, 1);
-      const n = silent || db < ABS_GATE ? 0 : significant * clamp((db - mic.floor[b] - GATE_DB) / (range - GATE_DB), 0, 1);
-      mic.norm[b] = n;
-      env[b] += (n - env[b]) * (1 - Math.exp(-dt / (n > env[b] ? ATTACK : RELEASE)));
-      level[b] = Math.pow(env[b], CURVE);
-    }
-    // Beat: a sharp rise in the low end (over two frames, since an attack spans analysis
-    // windows), well above its typical rise, while the low end leads the mix.
-    const lowDb = 10 * Math.log10((Math.pow(10, mic.db[0] / 10) + Math.pow(10, mic.db[1] / 10)) / 2 + 1e-12);
-    const rise = Math.max(0, lowDb - mic.lowHist[0]);
-    mic.lowHist.shift(); mic.lowHist.push(lowDb);
-    const prominent = lowDb + 2 >= loudest - 10;
-    if (!silent && prominent && rise > Math.max(3, 2.2 * mic.flux) && Math.max(mic.norm[0], mic.norm[1]) > 0.3 && t - mic.lastOnset > 0.28) {
-      flash = 1; mic.lastOnset = t;
-    }
-    mic.flux += (rise - mic.flux) * Math.min(1, dt / 1.2);
-  }
-
-  /* ── Ambient driver ── */
-
-  function ambient(dt) {
-    // An occasional gentle swell, every 15–40 s.
-    swell.next -= dt;
-    if (swell.phase < 0 && swell.next <= 0 && play > 0.5) { swell.phase = 0; swell.amp = 0.3 + Math.random() * 0.25; }
-    if (swell.phase >= 0) {
-      swell.phase += dt;
-      const p = swell.phase;
-      swell.v = p < 3 ? swell.amp * (0.5 - Math.cos(Math.PI * p / 3) / 2) : p < 4.5 ? swell.amp : swell.amp * (0.5 + Math.cos(Math.PI * Math.min(1, (p - 4.5) / 7)) / 2);
-      if (p > 11.5) { swell.phase = -1; swell.v = 0; swell.next = 15 + Math.random() * 25; }
-    }
-    for (let b = 0; b < BANDS; b++) {
-      const n = noise(t * (0.21 + b * 0.025), seeds[b]);
-      const target = play * (0.16 + 0.42 * n + swell.v * (1 - b / (BANDS + 2)));
-      env[b] += (target - env[b]) * (1 - Math.exp(-dt / (target < env[b] ? 0.45 : 0.6)));
-      level[b] = Math.pow(env[b], 1.4);
-    }
-  }
-
-  /* ── Drawing ── */
-
-  const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${Math.min(0.92, Math.max(0, a)).toFixed(4)})`;
-
-  // A soft elliptical pool of light; the gradient reaches zero long before the shape's bounds.
+  // A soft pool of light: the gradient reaches zero long before the shape's bounds.
   function pool(x, y, rx, ry, c, a, angle = 0) {
-    if (a < 0.003 || rx < 0.5 || ry < 0.5) return;
+    if (a < 0.002 || rx < 0.5 || ry < 0.5) return;
     g.save();
     g.translate(x, y);
     if (angle) g.rotate(angle);
     g.scale(rx / ry, 1);
     const gr = g.createRadialGradient(0, 0, 0, 0, 0, ry);
     gr.addColorStop(0, rgba(c, a));
-    gr.addColorStop(0.28, rgba(c, a * 0.66));
-    gr.addColorStop(0.6, rgba(c, a * 0.24));
-    gr.addColorStop(0.85, rgba(c, a * 0.05));
+    gr.addColorStop(0.25, rgba(c, a * 0.72));
+    gr.addColorStop(0.55, rgba(c, a * 0.3));
+    gr.addColorStop(0.8, rgba(c, a * 0.08));
     gr.addColorStop(1, rgba(c, 0));
     g.fillStyle = gr;
     g.fillRect(-ry, -ry, ry * 2, ry * 2);
@@ -1081,50 +1011,48 @@ const viz = (() => {
 
   function draw() {
     g.clearRect(0, 0, W, H);
-    if (vis < 0.004) return;
-    const I = INTENSITY[settings.intensity] || INTENSITY.normal;
-    const A = vis * I.a;
-    g.globalCompositeOperation = 'lighter';               // light adds up, like light does
+    const level = vis * gain * (0.42 + 0.58 * play);   // paused: dimmer; idle: almost out
+    if (level < 0.003) return;
+    const o = canvas.getBoundingClientRect(), d = els.disc.getBoundingClientRect(), c = els.cover.getBoundingClientRect();
+    const cx = (d.left - o.left + d.width / 2) * SCALE, cy = (d.top - o.top + d.height / 2) * SCALE, R = Math.max(1, (d.width / 2) * SCALE);
+    const m = Math.min(W, H);
+    const drift = (k, i, amp) => (noise(t * k, seeds[i]) - 0.5) * 2 * amp * roam;
 
-    // A wide, faint haze that carries the overall loudness.
-    let overall = 0;
-    for (let b = 0; b < BANDS; b++) overall += level[b] / BANDS;
-    pool(W / 2, H * 1.04, W * 0.7, H * (0.08 + 0.07 * overall + 0.03 * flash) * I.h, palette.now[0], (0.05 + 0.2 * overall + 0.14 * flash) * A);
+    g.globalCompositeOperation = 'lighter';          // light adds up, like light does
+    // Where each light lives: two around the disc, two low in the room. All wander slowly.
+    const spots = [
+      [cx + drift(0.031, 0, R * 0.9), cy + drift(0.027, 1, R * 0.8), m * 0.42],
+      [cx + R * 0.6 + drift(0.024, 2, R * 1.1), cy + R * 0.9 + drift(0.029, 3, R * 0.6), m * 0.36],
+      [W * 0.3 + drift(0.022, 4, W * 0.14), H * 0.97 + drift(0.026, 5, H * 0.05), m * 0.5],
+      [W * 0.72 + drift(0.025, 1, W * 0.14), H * 0.98 + drift(0.021, 0, H * 0.05), m * 0.46],
+    ];
+    const brightness = [0.3, 0.24, 0.3, 0.27];
+    spots.forEach(([x, y, r], i) => {
+      const breathe = 0.75 + 0.25 * noise(t * 0.045, seeds[i] + 9);       // very slow, ~40 s+
+      pool(x, y, r * (0.92 + 0.12 * noise(t * 0.03, seeds[i] + 4)), r * 0.82, pal.now[i], brightness[i] * breathe * level);
+    });
 
-    // Light pools, mirrored from the centre: bass in the middle, highs toward the edges.
-    for (let b = 0; b < BANDS; b++) {
-      const lv = level[b];
-      const kick = flash * (b < 3 ? 1 : 0.45);
-      const ry = Math.min(H * 0.23, H * (0.04 + 0.16 * lv + 0.035 * kick) * I.h);
-      const rx = W * (0.075 + 0.055 * lv);
-      const a = (0.025 + 0.68 * lv + 0.32 * kick) * A;
-      for (const side of [-1, 1]) {
-        const drift = (noise(t * 0.045 + b * 0.7, seeds[BANDS + b] + (side > 0 ? 13 : 0)) - 0.5) * 0.05;
-        const x = W * (0.5 + side * (0.03 + b * 0.064 + drift));
-        pool(x, H + ry * 0.14, rx, ry, palette.now[b], a);
-      }
-    }
-
-    // Glints: soft patches drifting across the part of the disc the sleeve doesn't cover.
-    const d = els.disc.getBoundingClientRect(), c = els.cover.getBoundingClientRect(), o = canvas.getBoundingClientRect();
+    // The sheen: light catching the vinyl, on the side the sleeve leaves uncovered.
     if (d.width > 4) {
-      const cx = (d.left - o.left + d.width / 2) * SCALE, cy = (d.top - o.top + d.height / 2) * SCALE, R = (d.width / 2) * SCALE;
       const away = Math.atan2(cy - (c.top - o.top + c.height / 2) * SCALE, cx - (c.left - o.left + c.width / 2) * SCALE);
-      const mids = (level[3] + level[4] + level[5] + level[6]) / 4;
-      for (const gl of glints) {
-        const th = away + 1.25 * Math.sin(gl.phase);
-        const r = R * (0.5 + 0.5 * noise(t * 0.07, gl.seed));
-        const x = cx + Math.cos(th) * r, y = cy + Math.sin(th) * r;
-        const swellG = 0.5 + 0.5 * noise(t * 0.19, gl.seed + 7);
-        const lv = mode === 'mic' ? mids : level[2 + (glints.indexOf(gl) % 4)];
-        const a = (0.025 + 0.4 * lv * swellG + 0.34 * flash) * A;
-        pool(x, y, R * (0.26 + 0.14 * lv + 0.08 * flash), R * (0.1 + 0.05 * lv), glintCol.now, a, th + Math.PI / 2);
-      }
+      const th = away + 0.95 * Math.sin(t * 0.033 + seeds[4]);
+      const rr = R * (0.5 + 0.12 * noise(t * 0.04, seeds[5]));
+      const sx = cx + Math.cos(th) * rr, sy = cy + Math.sin(th) * rr;
+      // Its colour follows the nearest lights.
+      let wsum = 0; const col = [0, 0, 0];
+      spots.forEach(([x, y, r], i) => {
+        const w = 1 / (1 + Math.hypot(x - sx, y - sy) / r);
+        wsum += w; for (let k = 0; k < 3; k++) col[k] += pal.now[i][k] * w;
+      });
+      for (let k = 0; k < 3; k++) col[k] = col[k] / wsum + (255 - col[k] / wsum) * 0.35;
+      g.save();
+      g.beginPath(); g.arc(cx, cy, R * 0.985, 0, Math.PI * 2); g.clip();
+      pool(sx, sy, R * 0.5, R * 0.17, col, 0.3 * level, th + Math.PI / 2);
+      pool(sx, sy, R * 0.75, R * 0.55, col, 0.09 * level);          // a broad, faint wash around it
+      g.restore();
     }
     g.globalCompositeOperation = 'source-over';
   }
-
-  /* ── Loop ── */
 
   function frame(now) {
     raf = 0;
@@ -1133,24 +1061,19 @@ const viz = (() => {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     const still = reducedMotion.matches;
-    const ease = (cur, target, tau, eps) => { if (still) return target; const n = cur + (target - cur) * (1 - Math.exp(-dt / tau)); return Math.abs(n - target) < eps ? target : n; };
-    vis = ease(vis, visTarget(), 0.9, 0.004);
-    const playTarget = still ? 0.55 : state.playing ? 1 : 0;
-    play = ease(play, playTarget, playTarget > play ? 1.4 : 0.9, 0.005);
-    if (!still) t += dt;
-    if (still) { for (let b = 0; b < BANDS; b++) { env[b] = 0.35; level[b] = Math.pow(0.35, 1.4); } flash = 0; }
-    else if (mode === 'mic') listen(dt);
-    else ambient(dt);
-    flash = ease(flash, 0, 0.26, 0.002);
-    palette.now.forEach((c, b) => { for (let k = 0; k < 3; k++) c[k] = ease(c[k], palette.want[b][k], 2, 0.5); });
-    for (let k = 0; k < 3; k++) glintCol.now[k] = ease(glintCol.now[k], glintCol.want[k], 2, 0.5);
-    if (!still) glints.forEach((gl) => { gl.phase += dt * gl.speed * (mode === 'mic' ? 1 : play); });   // still when paused
+    // Every brightness-affecting value eases over seconds and lands exactly, so the loop can rest.
+    const ease = (cur, target, tau, eps) => { const n = cur + (target - cur) * (1 - Math.exp(-dt / tau)); return Math.abs(n - target) < eps ? target : n; };
+    const slow = still ? 1.2 : 1;                     // reduced motion: same fades, settling sooner
+    vis = ease(vis, visTarget(), still ? slow : 2.0, 0.002);
+    play = ease(play, state.playing ? 1 : 0, still ? slow : 2.6, 0.003);
+    gain = ease(gain, gainTarget(), 0.8, 0.003);
+    roam = ease(roam, roamTarget(), 1.5, 0.002);      // so the slider never makes the lights jump
+    const k = Math.min(1, (now - pal.t0) / BLEND_MS), e = easeInOut(k);
+    for (let i = 0; i < N; i++) for (let j = 0; j < 3; j++) pal.now[i][j] = pal.from[i][j] + (pal.to[i][j] - pal.from[i][j]) * e;
+    if (!still && play > 0) t += dt * (0.04 + 0.96 * play);   // alive while playing; slows to a stop when paused
     draw();
-    if (debugOn && (debugTick = (debugTick + 1) % 3) === 0) drawDebug();
-
-    const coloursSettled = palette.now.every((c, b) => c.every((v, k) => v === palette.want[b][k])) && glintCol.now.every((v, k) => v === glintCol.want[k]);
-    const quiet = mode !== 'mic' && play === 0 && flash === 0 && env.every((v) => v < 0.002);
-    const settled = vis === visTarget() && coloursSettled && (still || quiet || vis === 0);
+    const settled = k >= 1 && vis === visTarget() && gain === gainTarget() && roam === roamTarget() &&
+      (still || vis * gain < 0.003 || (!state.playing && play === 0));
     if (!settled) raf = requestAnimationFrame(frame);
   }
 
@@ -1160,118 +1083,18 @@ const viz = (() => {
     raf = requestAnimationFrame(frame);
   }
 
-  /* ── Debug overlay (D) ── */
-
-  const dbg = $('#vizDebug');
-  function drawDebug() {
-    const rows = [];
-    for (let b = 0; b < BANDS; b++) {
-      const hz = mic.edges[b] && mic.ctx ? `${Math.round(mic.edges[b][0] * mic.ctx.sampleRate / mic.an.fftSize)}Hz` : `b${b}`;
-      const bar = '█'.repeat(Math.round(level[b] * 20)).padEnd(20, '·');
-      rows.push(mode === 'mic'
-        ? `${hz.padStart(7)} ${bar} ${level[b].toFixed(2)}  ${mic.db[b].toFixed(0).padStart(4)} dB  [${mic.floor[b].toFixed(0)} … ${mic.peak[b].toFixed(0)}]`
-        : `${hz.padStart(7)} ${bar} ${level[b].toFixed(2)}`);
-    }
-    dbg.textContent = [
-      `visualizer: ${mode}   intensity: ${settings.intensity}   ${flash > 0.5 ? '● beat' : '○'}`,
-      mode === 'mic' ? `input ${mic.input.toFixed(1)} dBFS${mic.input < -66 ? '  (gated: silence)' : ''}` : `ambient   play ${play.toFixed(2)}   swell ${swell.v.toFixed(2)}`,
-      '', ...rows,
-    ].join('\n');
-  }
-
-  /* ── Microphone ── */
-
-  async function startMic() {
-    const token = ++mic.token;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('unsupported'), { name: 'NotSupportedError' });
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-    if (token !== mic.token || mode !== 'mic') { stream.getTracks().forEach((tr) => tr.stop()); return; }
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new Ctx();
-    const an = ctx.createAnalyser();
-    an.fftSize = 2048;
-    an.smoothingTimeConstant = 0.3;               // we do our own smoothing
-    an.minDecibels = -110; an.maxDecibels = -10;
-    ctx.createMediaStreamSource(stream).connect(an);      // analysed only; never played back
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    const hz = ctx.sampleRate / an.fftSize;
-    const edges = [];                             // 8 log-spaced bands, 40 Hz – 12 kHz
-    for (let b = 0; b < BANDS; b++) {
-      const lo = Math.max(1, Math.round(40 * Math.pow(300, b / BANDS) / hz));
-      const hi = Math.max(lo, Math.round(40 * Math.pow(300, (b + 1) / BANDS) / hz) - 1);
-      edges.push([lo, Math.min(an.frequencyBinCount - 1, hi)]);
-    }
-    Object.assign(mic, { stream, ctx, an, edges, spec: new Float32Array(an.frequencyBinCount), td: new Float32Array(an.fftSize) });
-    mic.floor.fill(-70); mic.peak.fill(-50); env.fill(0);
-    stream.getTracks().forEach((tr) => tr.addEventListener('ended', () => { if (mode === 'mic' && mic.stream === stream) fallback({ name: 'NotFoundError' }); }));
-    poke();
-  }
-
-  function stopMic() {
-    mic.token++;
-    const s = mic.stream;
-    mic.stream = null;
-    if (s) s.getTracks().forEach((tr) => tr.stop());
-    if (mic.ctx) mic.ctx.close().catch(() => {});
-    Object.assign(mic, { ctx: null, an: null });
-  }
-
-  function fallback(err) {
-    stopMic();
-    mode = 'ambient';
-    settings.visualizer = 'ambient';
-    saveSettings();
-    syncPanel();
-    const name = err && err.name;
-    setVizNote(name === 'NotAllowedError' || name === 'SecurityError' ? 'Microphone access was not allowed, so Ambient is on instead.'
-      : name === 'NotFoundError' || name === 'OverconstrainedError' ? 'No microphone found, so Ambient is on instead.'
-      : 'The microphone isn’t available here, so Ambient is on instead.');
-    poke();
-  }
-
-  async function micGranted() {
-    try { return (await navigator.permissions.query({ name: 'microphone' })).state === 'granted'; } catch { return false; }
-  }
-
-  const lift = (c, tint, k = 0.3) => mixRgb(mixRgb(c, tint, 0.3), [255, 244, 228], k);
-
   return {
-    // userChose: true when picked in the panel (may prompt); false on load (only if already allowed).
-    async setMode(next, userChose) {
-      if (next === mode && (next !== 'mic' || mic.stream)) { poke(); return; }
-      if (mode === 'mic' && next !== 'mic') stopMic();
-      mode = next;
-      if (next !== 'mic') env.fill(Math.min(...env));     // no jump when switching back to ambient
-      poke();
-      if (next !== 'mic') return;
-      if (!userChose && !(await micGranted())) {          // never prompt on page load
-        fallback({ name: 'Deferred' });
-        setVizNote('Pick Mic again to allow the microphone.');
-        return;
-      }
-      try { await startMic(); } catch (e) { if (mode === 'mic') fallback(e); }
-    },
-    // Palette across the bands: the vinyl tint at the centre, the cover's other colours outward.
+    // Song change: blend from the current colours to the new palette, in step with the background.
     colours(tint, mesh) {
-      const order = [tint, mesh[3], mesh[1], tint, mesh[2], mesh[4], mesh[3], mesh[1]];
-      for (let b = 0; b < BANDS; b++) {
-        const c = order[b];
-        palette.want[b] = c === tint ? mixRgb(tint, [255, 244, 228], 0.18) : lift(c, tint, 0.32);
-        // keep the light luminous even when the cover is dark
-        const [h, s, l] = rgbToHsl(palette.want[b]);
-        palette.want[b] = hslToRgb([h, clamp(s * 1.1, 0.25, 0.85), clamp(l, 0.55, 0.78)]);
-      }
-      glintCol.want = mixRgb(tint, [255, 248, 236], 0.55);
+      const luminous = (c) => { const [h, s, l] = rgbToHsl(mixRgb(c, tint, 0.25)); return hslToRgb([h, clamp(s * 1.1, 0.35, 0.8), clamp(l + 0.25, 0.52, 0.68)]); };
+      const next = [mixRgb(tint, [255, 240, 220], 0.12), luminous(mesh[3]), luminous(mesh[1]), luminous(mesh[2])];
+      pal.from = pal.now.map((c) => c.slice());
+      pal.to = next;
+      pal.t0 = performance.now();
       poke();
     },
     poke,
     resize,
-    toggleDebug() { debugOn = !debugOn; dbg.hidden = !debugOn; if (debugOn) { drawDebug(); poke(); } },
-    stats() { return { mode, level: Array.from(level), norm: Array.from(mic.norm), floor: Array.from(mic.floor), peak: Array.from(mic.peak), db: Array.from(mic.db), flash, input: mic.input, onsetAt: mic.lastOnset, t }; },
-    hidden() { if (mic.stream) stopMic(); },                // mic off while the tab is hidden
-    visible() { if (mode === 'mic' && !mic.stream) startMic().catch((e) => { if (mode === 'mic') fallback(e); }); poke(); },
   };
 })();
 
@@ -1334,7 +1157,6 @@ function bindInput() {
     const t = e.target;
     if (e.key === 'Escape' && panel.open) { e.preventDefault(); closeSettings(); return; }
     if ((e.key === 's' || e.key === 'S') && !(t.closest && t.closest('input, textarea'))) { e.preventDefault(); toggleSettings(); return; }
-    if ((e.key === 'd' || e.key === 'D') && !(t.closest && t.closest('input, textarea'))) { e.preventDefault(); viz.toggleDebug(); return; }
     if (t.closest && t.closest('input, textarea, .setup, .connect')) return;   // typing / setup
     if (t.closest && t.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
     if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); if (!e.repeat) control('toggle'); }
@@ -1343,9 +1165,9 @@ function bindInput() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { stopPolling(); viz.hidden(); return; }   // no polling, no mic while hidden
+    if (document.hidden) { stopPolling(); return; }   // no polling while hidden (the glow pauses itself)
     acquireWakeLock();
-    viz.visible();
+    glow.poke();
     drawClock();
     pollNow();
   });
@@ -1360,7 +1182,7 @@ function bindInput() {
   });
 
   reducedMotion.addEventListener('change', () => { spin.set(false); render(); });
-  addEventListener('resize', viz.resize);
+  addEventListener('resize', glow.resize);
 
   // Sleep/wake watchdog: timers stall during sleep, so notice the gap and resume right away.
   // Also revives polling if it ever stopped for an unexpected reason.
@@ -1398,8 +1220,9 @@ async function start() {
   bindInput();
   bindSetup();
   bindSettings();
-  viz.resize();
+  glow.resize();
   applySettings();
+  syncPanel();
   drawClock();
   drawEvening();
   setPalette(null);

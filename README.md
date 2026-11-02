@@ -21,7 +21,7 @@ Double-click (or double-tap) for fullscreen. Space plays or pauses, ← → skip
 
 Open settings with the gear next to the playback controls, or press **S**. Close with **Esc**, the gear, or a click outside. Changes apply straight away and are remembered on that device.
 
-- **Visualizer:** soft light along the bottom of the screen and a few glints drifting across the disc, tinted by the album. *Ambient* (default) flows gently while music plays and settles when paused. *Mic* follows the music in the room: bass lights the middle, highs the edges, and beats pulse the light. It adjusts itself to quiet and loud songs alike. It asks for the microphone only when you pick it, and nothing leaves your device. If the mic isn't allowed or available, it falls back to Ambient. *Off* turns it off. **Intensity** (Subtle / Normal / Vivid) sets how bright it gets. Press **D** to show a small debug readout of the levels.
+- **Glow:** a soft, slowly drifting light in the album's colours, around the record and low in the room, with a gentle sheen moving across the vinyl. It dims and goes still when paused and fades almost out when nothing is playing. Turn it on or off, and use **Intensity** (0–100) to set how bright it is and how far the light wanders. It never flashes: every change is a slow fade.
 - **Clock:** show or hide it, 12h or 24h, with or without the date.
 - **Evening mode:** gently warms and dims the screen at night (9 pm to 6 am by default; set your own times).
 - **Progress line:** show or hide it.
