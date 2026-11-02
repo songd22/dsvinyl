@@ -21,6 +21,10 @@
   transition: --m0 6s ease-in-out, --m1 6s ease-in-out, --m2 6s ease-in-out, --m3 6s ease-in-out, --m4 6s ease-in-out,
               --tint 3s ease-in-out, --soft 2.4s ease, --evening 60s linear;
 }
+:root.ready.quick-evening {          /* a settings change shows within a couple of seconds */
+  transition: --m0 6s ease-in-out, --m1 6s ease-in-out, --m2 6s ease-in-out, --m3 6s ease-in-out, --m4 6s ease-in-out,
+              --tint 3s ease-in-out, --soft 2.4s ease, --evening 2.5s ease;
+}
 :root.paused, :root.idle, :root.setup-mode, :root.connect-mode { --soft: 1; }
 @media (orientation: portrait) { :root { --S: min(66vw, 40vh); } }
 
@@ -62,6 +66,12 @@ body.cursor-idle, body.cursor-idle * { cursor: none !important; }
 .grain {
   position: fixed; inset: 0; pointer-events: none; opacity: .06; mix-blend-mode: overlay;
   background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.viz {                       /* a row of soft bars along the bottom edge */
+  position: fixed; left: 0; right: 0; bottom: 0; width: 100%; height: 20vmin; pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: calc(.7 - var(--soft) * .25);
+  filter: blur(.6px);              /* just enough to melt the edges */
 }
 .dimmer, .warmth, .vignette { position: fixed; inset: 0; pointer-events: none; }
 .dimmer { background: #0b0704; opacity: calc(var(--soft) * .16 + var(--evening) * .14); }
@@ -154,7 +164,8 @@ body.cursor-idle, body.cursor-idle * { cursor: none !important; }
 .artist { margin-top: .45em; font-size: max(14px, 2.1vmin); color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .progress { margin-top: max(14px, 2.2vmin); height: 2px; width: calc(var(--S) * .55); background: rgb(255 244 230 / .12); border-radius: 2px; overflow: hidden; }
 .progress i { display: block; height: 100%; width: 100%; background: rgb(255 244 230 / .55); border-radius: 2px; transform-origin: 0 50%; transform: scaleX(0); }
-:root:not(.has-track) .progress { opacity: 0; }
+.progress { transition: opacity .6s ease; }
+:root:not(.has-track) .progress, :root.no-progress .progress { opacity: 0; }
 
 /* ───────────────────────── Clock ───────────────────────── */
 
@@ -180,6 +191,10 @@ body.cursor-idle, body.cursor-idle * { cursor: none !important; }
 :root.idle .clock.focus, :root.connect-mode .clock.focus { opacity: 1; }
 :root.setup-mode .clock.corner { opacity: 1; }
 :root.setup-mode .clock.focus { opacity: 0; }
+:root.no-clock .clock { opacity: 0 !important; }
+:root.no-date .clock .date { display: none; }
+/* Clock turned off: when idle, the art stays softly present instead of making way for it. */
+:root.no-clock.idle.has-track .pair { opacity: .5; transform: scale(.97); filter: saturate(.8); }
 
 /* ───────────────────────── Controls ───────────────────────── */
 
@@ -196,6 +211,10 @@ body.cursor-idle .controls, :root.setup-mode .controls, :root.connect-mode .cont
 .controls button:active { transform: scale(.92); }
 .controls button:focus-visible { outline: 1px solid rgb(255 240 220 / .5); outline-offset: 2px; }
 .controls svg { width: 46%; height: 46%; fill: currentColor; }
+.controls .divider { width: 1px; align-self: stretch; margin: 8px 2px; background: rgb(255 240 220 / .12); }
+.controls .gear svg { width: 44%; height: 44%; transition: transform .6s cubic-bezier(.22, .9, .25, 1); }
+:root.settings-open .controls .gear svg { transform: rotate(60deg); }
+:root.settings-open body.cursor-idle .controls, :root.settings-open .controls { opacity: 1; pointer-events: auto; }
 .i-pause { display: none; }
 :root.playing .i-pause { display: block; }
 :root.playing .i-play { display: none; }
@@ -260,4 +279,82 @@ body.cursor-idle .setup, body.cursor-idle .setup *, body.cursor-idle .connect, b
   .blob { animation: none; }
   .pair, .disc-wrap, .pair.swap .disc-wrap { transition-duration: .01s; }
   .cover img, .label img { transition-duration: .3s; }
+}
+
+/* ───────────────────────── Settings panel ───────────────────────── */
+
+.scrim { position: fixed; inset: 0; z-index: 9; }
+:root.settings-open .controls { z-index: 10; }        /* gear and playback stay usable above the scrim */
+.controls { transition: opacity .5s ease, left .55s cubic-bezier(.22, .9, .25, 1); }
+@media (min-width: 640px) {             /* re-centre in the space the panel leaves */
+  :root.settings-open .controls { left: calc((100vw - min(340px, 88vw)) / 2); }
+}
+.scrim[hidden] { display: none; }
+.settings {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 11;
+  width: min(340px, 88vw); overflow-y: auto; overscroll-behavior: contain;
+  padding: max(22px, env(safe-area-inset-top)) 24px 22px;
+  background: rgb(20 12 7 / .5); -webkit-backdrop-filter: blur(26px) saturate(1.25); backdrop-filter: blur(26px) saturate(1.25);
+  box-shadow: inset 1px 0 0 rgb(255 240 220 / .08), -30px 0 80px rgb(0 0 0 / .25);
+  font-size: 14px; line-height: 1.4; color: var(--ink);
+  transform: translateX(104%); visibility: hidden;
+  transition: transform .55s cubic-bezier(.22, .9, .25, 1), visibility 0s .55s;
+  outline: none; user-select: none; -webkit-user-select: none;
+}
+:root.settings-open .settings { transform: none; visibility: visible; transition: transform .55s cubic-bezier(.22, .9, .25, 1), visibility 0s; }
+body.cursor-idle .settings, body.cursor-idle .settings * { cursor: auto !important; }
+.settings header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.settings h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.005em; }
+.settings .close { width: 32px; height: 32px; margin-right: -6px; border: 0; border-radius: 50%; background: none; color: var(--ink-soft); cursor: pointer; display: grid; place-items: center; }
+.settings .close:hover { background: rgb(255 240 220 / .08); color: var(--ink); }
+.settings .close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.settings section { padding: 16px 0; border-bottom: 1px solid rgb(255 240 220 / .07); }
+.settings h3 { margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: rgb(255 244 230 / .45); }
+.settings .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; transition: opacity .3s ease; }
+.settings .row.off { opacity: .35; pointer-events: none; }
+
+/* Segmented choice */
+.seg { display: flex; padding: 3px; border-radius: 10px; background: rgb(0 0 0 / .22); box-shadow: inset 0 0 0 1px rgb(255 240 220 / .06); }
+.seg button {
+  flex: 1; padding: 7px 10px; border: 0; border-radius: 7px; background: none; cursor: pointer;
+  color: var(--ink-soft); font: 500 13px var(--font); transition: background .25s ease, color .25s ease;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-checked="true"] { background: rgb(255 240 220 / .14); color: var(--ink); }
+.seg.small { min-width: 116px; }
+.seg.small button { padding: 5px 10px; }
+
+/* Toggle switch */
+.switch {
+  position: relative; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+  background: rgb(255 240 220 / .14); transition: background .25s ease;
+}
+.switch::after {
+  content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%;
+  background: rgb(255 244 230 / .85); box-shadow: 0 1px 3px rgb(0 0 0 / .3);
+  transition: transform .3s cubic-bezier(.22, .9, .25, 1);
+}
+.switch[aria-checked="true"] { background: rgb(226 156 92 / .85); }
+.switch[aria-checked="true"]::after { transform: translateX(16px); background: #fff7ec; }
+.switch:focus-visible, .seg button:focus-visible, .btn:focus-visible, .link:focus-visible, .settings input:focus-visible { outline: 1px solid rgb(255 206 150 / .7); outline-offset: 2px; }
+
+.settings input[type="time"] {
+  padding: 6px 8px; border-radius: 8px; border: 1px solid rgb(255 240 220 / .12); background: rgb(0 0 0 / .22);
+  color: var(--ink); font: 13px var(--font); color-scheme: dark; font-variant-numeric: tabular-nums;
+  width: 128px;
+}
+.settings .note { margin: 10px 0 0; font-size: 12.5px; color: rgb(255 214 170 / .75); min-height: 0; }
+.settings .note:empty { display: none; }
+.settings .account { margin: 0 0 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.settings .account strong { color: var(--ink); font-weight: 500; }
+.settings .buttons { display: flex; gap: 8px; }
+.btn { padding: 8px 14px; border: 0; border-radius: 9px; cursor: pointer; background: rgb(255 240 220 / .1); color: var(--ink); font: 500 13px var(--font); transition: background .2s ease, opacity .2s ease; }
+.btn:hover { background: rgb(255 240 220 / .18); }
+.btn:disabled { opacity: .35; cursor: default; }
+.settings footer { padding-top: 16px; text-align: center; }
+.link { border: 0; background: none; padding: 4px; cursor: pointer; color: rgb(255 244 230 / .45); font: 13px var(--font); }
+.link:hover { color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .settings, :root.settings-open .settings { transition-duration: .01s; }
 }

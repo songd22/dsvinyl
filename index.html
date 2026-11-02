@@ -19,6 +19,8 @@
   </div>
   <div class="glow" aria-hidden="true"></div>
   <div class="grain" aria-hidden="true"></div>
+  <!-- Visualizer: a row of soft bars along the bottom, tinted by the album (Settings → Visualizer). -->
+  <canvas class="viz" id="viz" aria-hidden="true"></canvas>
 
   <main class="stage drift" aria-label="Now playing">
     <div class="pair" id="pair">
@@ -63,7 +65,67 @@
     <button type="button" data-action="next" aria-label="Next">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="17" y="5.5" width="2" height="13" rx="1"/><path d="M5.8 6.3v11.4a.9.9 0 0 0 1.4.75l7.5-5.7a.9.9 0 0 0 0-1.5l-7.5-5.7a.9.9 0 0 0-1.4.75Z"/></svg>
     </button>
+    <span class="divider" aria-hidden="true"></span>
+    <button type="button" data-action="settings" id="gearBtn" class="gear" aria-label="Settings" aria-expanded="false" aria-controls="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" d="M19.55 9.67 L22.00 9.97 L22.00 14.03 L19.55 14.33 L18.99 15.69 L20.50 17.64 L17.64 20.50 L15.69 18.99 L14.33 19.55 L14.03 22.00 L9.97 22.00 L9.67 19.55 L8.31 18.99 L6.36 20.50 L3.50 17.64 L5.01 15.69 L4.45 14.33 L2.00 14.03 L2.00 9.97 L4.45 9.67 L5.01 8.31 L3.50 6.36 L6.36 3.50 L8.31 5.01 L9.67 4.45 L9.97 2.00 L14.03 2.00 L14.33 4.45 L15.69 5.01 L17.64 3.50 L20.50 6.36 L18.99 8.31Z M15.1 12 a3.1 3.1 0 1 0 -6.2 0 a3.1 3.1 0 1 0 6.2 0Z"/></svg>
+    </button>
   </nav>
+
+  <!-- Settings: a slim translucent panel; every change applies at once and is saved. -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="settings" id="settings" aria-label="Settings" aria-hidden="true" tabindex="-1">
+    <header>
+      <h2>Settings</h2>
+      <button type="button" class="close" id="settingsClose" aria-label="Close settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+
+    <section>
+      <h3>Visualizer</h3>
+      <div class="seg" role="radiogroup" aria-label="Visualizer" data-setting="visualizer">
+        <button type="button" role="radio" data-value="off">Off</button>
+        <button type="button" role="radio" data-value="ambient">Ambient</button>
+        <button type="button" role="radio" data-value="mic">Mic</button>
+      </div>
+      <p class="note" id="vizNote" aria-live="polite"></p>
+    </section>
+
+    <section>
+      <h3>Clock</h3>
+      <div class="row"><span>Show clock</span><button type="button" class="switch" role="switch" data-setting="clock" aria-label="Show clock"></button></div>
+      <div class="row" data-requires="clock"><span>Format</span>
+        <div class="seg small" role="radiogroup" aria-label="Clock format" data-setting="clockFormat">
+          <button type="button" role="radio" data-value="12">12h</button>
+          <button type="button" role="radio" data-value="24">24h</button>
+        </div>
+      </div>
+      <div class="row" data-requires="clock"><span>Show date</span><button type="button" class="switch" role="switch" data-setting="clockDate" aria-label="Show date"></button></div>
+    </section>
+
+    <section>
+      <h3>Evening mode</h3>
+      <div class="row"><span>Warm and dim at night</span><button type="button" class="switch" role="switch" data-setting="evening" aria-label="Evening mode"></button></div>
+      <div class="row" data-requires="evening"><span>Starts</span><input type="time" data-setting="eveningStart" aria-label="Evening starts"></div>
+      <div class="row" data-requires="evening"><span>Ends</span><input type="time" data-setting="eveningEnd" aria-label="Evening ends"></div>
+    </section>
+
+    <section>
+      <h3>Display</h3>
+      <div class="row"><span>Show progress line</span><button type="button" class="switch" role="switch" data-setting="progress" aria-label="Show progress line"></button></div>
+    </section>
+
+    <section>
+      <h3>Spotify</h3>
+      <p class="account" id="account">Not connected</p>
+      <div class="buttons">
+        <button type="button" class="btn" id="disconnectBtn">Disconnect</button>
+        <button type="button" class="btn" id="resetBtn">Reset setup</button>
+      </div>
+    </section>
+
+    <footer><button type="button" class="link" id="restoreBtn">Restore defaults</button></footer>
+  </aside>
 
   <!-- One-time setup (only when no Client ID is saved). -->
   <section class="setup" id="setup" hidden aria-labelledby="setupTitle">
